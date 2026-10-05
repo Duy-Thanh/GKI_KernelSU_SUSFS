@@ -19,7 +19,7 @@ on:
           - KowSU
           - No Root
           - KernelSU-Next-SUSFS
-        default: All
+        default: KernelSU-Next
       kernelsu_next_commit:
         description: "Pin KernelSU-Next manager to this commit (40-char SHA, empty = latest dev tip)"
         required: false

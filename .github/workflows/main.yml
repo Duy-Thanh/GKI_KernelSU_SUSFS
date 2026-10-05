@@ -45,7 +45,7 @@ on:
           - 6.1.x-android14
           - 6.6.x-android15
           - 6.12.x-android16
-        default: All
+        default: 6.1.x-android14
       os_patch_level:
         description: "Patch date (YYYY-MM), kernel sublevel, lts, or All (no filter)"
         required: true
@@ -61,7 +61,7 @@ on:
       brand_name:
         description: "Kernel Branding (empty = stock version string)"
         type: string
-        default: Wild
+        default: Nekkochan
       keep_kmi:
         description: "Keep stock KMI generation suffix in kernel version (fix #265)"
         type: boolean
@@ -86,7 +86,7 @@ on:
           - KowSU
           - No Root
           - All (KernelSU-Next + KernelSU + ReSukiSU)
-        default: All (KernelSU-Next + KernelSU + ReSukiSU)
+        default: KernelSU-Next
       use_susfs:
         description: "SUSFS"
         type: boolean
@@ -126,11 +126,7 @@ on:
       use_perf:
         description: "Performance"
         type: boolean
-        default: false
-      test_release_notes:
-        description: "Render release notes preview only (skip all builds + release)"
-        type: boolean
-        default: false
+        default: true
   schedule:
     - cron: '0 5 * * 1'  # Monday 12am EST (5am UTC)
 
@@ -397,8 +393,8 @@ jobs:
           done
 
           # Tracked build helpers (resolved automatically, before the run)
-          emit kernel_patches_commit "$(resolve_sha https://github.com/WildKernels/kernel_patches.git refs/heads/main)"
-          emit anykernel3_commit   "$(resolve_sha https://github.com/WildKernels/AnyKernel3.git refs/heads/gki-2.0)"
+          emit kernel_patches_commit "$(resolve_sha https://github.com/Duy-Thanh/kernel_patches.git refs/heads/main)"
+          emit anykernel3_commit   "$(resolve_sha https://github.com/Duy-Thanh/AnyKernel3.git refs/heads/gki-2.0)"
           emit droidspaces_commit  "$(resolve_sha https://github.com/ravindu644/Droidspaces-OSS.git refs/heads/main)"
 
           echo "Resolved:"
@@ -1653,7 +1649,7 @@ jobs:
           if env("USE_PERF","false")=="true": feats.append("Performance Tuning")
           if env("PAGE_SIZE","4k")=="16k": feats.append("16 KB page size (ARM64)")
           lines=[]
-          lines.append("# Wild Kernels for GKI2 Devices")
+          lines.append("# Nekko Kernel for GKI2 Devices")
           lines.append("")
           lines.append("## Root")
           lines.append("")
@@ -1690,7 +1686,7 @@ jobs:
           lines.append("")
           lines.append("## Features")
           lines.append("")
-          _kp_url="https://github.com/WildKernels/kernel_patches/commit/"
+          _kp_url="https://github.com/Duy-Thanh/kernel_patches/commit/"
           _feat_commit={"NoMount":("https://github.com/maxsteeel/nomount/commit/",nm),"Baseband Guard":(_kp_url,kp),"DroidSpaces-OSS":("https://github.com/ravindu644/Droidspaces-OSS/commit/",ds)}
           for f in feats:
               _u,_c=_feat_commit.get(f,("",""))
