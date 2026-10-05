@@ -55,6 +55,18 @@ runs:
       working-directory: ${{ github.workspace }}/kernel
       run: |
         PAGE_SIZE="${{ inputs.page_size }}"
+        # Quality-first build settings:
+        #  - legacy: LTO=full (was thin). FullLTO does whole-program
+        #    optimization; costs build time + RAM (the workflow already adds
+        #    16 GB swap). Revert to LTO=thin if a branch runs out of memory.
+        #  - Kleaf: --config=fast implies --lto=thin, which would downgrade
+        #    every newer kernel to ThinLTO. --lto=default (must come AFTER
+        #    --config=fast, later flags win) hands LTO back to the branch's
+        #    defconfig, i.e. what AOSP ships and KMI-validates for it.
+        #    --config=fast itself is kept on purpose: it only selects the
+        #    non-hermetic local sandbox + thin default, and keeps bazel-bin/
+        #    convenience symlinks that the two steps below resolve Image from.
+        #    Forcing full LTO here is one flag: --lto=default -> --lto=full.
         sed -i 's/check_defconfig//' ./common/build.config.gki
         if [ -f "build/build.sh" ]; then
           if [ "$PAGE_SIZE" != "4k" ]; then
@@ -68,7 +80,7 @@ runs:
           SKIP_EXT_MODULES=1 \
           SKIP_CP_KERNEL_HDR=1 \
           OUT_DIR="/home/runner/out" \
-          LTO=thin \
+          LTO=full \
           BUILD_CONFIG=common/build.config.gki.aarch64 \
           CC="/usr/bin/ccache clang" \
           CXX="/usr/bin/ccache clang++" \
@@ -83,6 +95,7 @@ runs:
           fi
           tools/bazel build \
             --config=fast \
+            --lto=default \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
             //common:kernel_aarch64/Image
