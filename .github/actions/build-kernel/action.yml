@@ -95,7 +95,7 @@ runs:
           fi
           tools/bazel build \
             --config=fast \
-            --lto=default \
+            --lto=full \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
             //common:kernel_aarch64/Image
