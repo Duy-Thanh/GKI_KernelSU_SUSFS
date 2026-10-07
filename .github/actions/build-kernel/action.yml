@@ -105,7 +105,6 @@ runs:
             --copts=-mllvm \
             --copts=-align-all-functions=6 \
             --copts=-march=armv8.2-a+crypto+dotprod+fp16+rcpc \
-            --strip=never \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
             //common:kernel_aarch64/Image
