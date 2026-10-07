@@ -96,6 +96,16 @@ runs:
           tools/bazel build \
             --config=fast \
             --lto=full \
+            --copts=-O3 \
+            --copts=-fvectorize \
+            --copts=-fslp-vectorize \
+            --copts=-fomit-frame-pointer \
+            --copts=-mllvm \
+            --copts=-inline-threshold=1000 \
+            --copts=-mllvm \
+            --copts=-align-all-functions=6 \
+            --copts=-march=armv8.2-a+crypto+dotprod+fp16+rcpc \
+            --strip=never \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
             //common:kernel_aarch64/Image
