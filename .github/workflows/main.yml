@@ -17,13 +17,13 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "Release Type"
+        description: "Release Type (Other release types currently have an occurred error and will be disabled)"
         type: choice
         options:
           - CI
-          - Nightly
-          - Pre-Release
-          - Release
+          # - Nightly
+          # - Pre-Release
+          # - Release
         default: CI
       use_cache:
         description: "Use ccache/bazel cache (restore/save)"
