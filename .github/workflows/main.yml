@@ -76,7 +76,7 @@ on:
           - update
         default: verified
       root_flavor:
-        description: "Root Flavor"
+        description: "Root Flavor (If you select KowSU, you MUST DISABLE SUSFS since KowSU doesn't work with SUSFS)"
         type: choice
         options:
           - KernelSU-Next
