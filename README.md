@@ -10,7 +10,7 @@ Based on WildKernels by TheWildJames
 </div>
 
 > [!CAUTION]
-> Wild Kernels is not responsible for bricked devices or damage. By flashing, you assume all risk. Back up your data and understand the risks before flashing.
+> Nekko Kernels is not responsible for bricked devices or damage. By flashing, you assume all risk. Back up your data and understand the risks before flashing.
 
 ---
 
@@ -32,9 +32,6 @@ Generic kernels built on [Google's GKI sources](https://android.googlesource.com
 - **Performance** — incl. NTSync
 - **DroidSpaces** — container runtime
 
-> [!TIP]
-> Full documentation: [Wiki](https://github.com/WildKernels/GKI_KernelSU_SUSFS/wiki)
-
 ---
 
 ## Build Your Own Kernel
@@ -43,27 +40,11 @@ Fork the repository and follow **[Build Your Own Kernel](docs/build-from-fork.md
 
 ---
 
-## Installation
-
-See **[Installation Guide](https://github.com/WildKernels/GKI_KernelSU_SUSFS/wiki/Installation)**.
-
----
-
-## Our Projects
-
-| Device | Repository | Description |
-|--------|------------|-------------|
-| **Multi** | [GKI_KernelSU_SUSFS](https://github.com/WildKernels/GKI_KernelSU_SUSFS) | Google GKI sources — built to be generic and work across many devices |
-| **Pixel** | [Sultan_KernelSU_SUSFS](https://github.com/WildKernels/Sultan_KernelSU_SUSFS) | Custom kernels for specific Pixel devices — built from Sultan sources |
-| **Samsung** | [Samsung_KernelSU_SUSFS](https://github.com/WildKernels/Samsung_KernelSU_SUSFS) | Built from Samsung sources and manifest |
-| **OnePlus** | [OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS) | Built from OnePlus sources and manifest |
-
----
-
 ## Special Thanks
 
 **These amazing people and projects make this possible:**
 
+- **WildKernels** — [TheWildJames](https://github.com/WildKernels/GKI_KernelSU_SUSFS)
 - **KernelSU** — [tiann](https://github.com/tiann/KernelSU)
 - **KernelSU-Next** — [rifsxd](https://github.com/KernelSU-Next/KernelSU-Next)
 - **KernelSU-Next SUSFS Fork** — [pershoot](https://github.com/pershoot/KernelSU-Next)
