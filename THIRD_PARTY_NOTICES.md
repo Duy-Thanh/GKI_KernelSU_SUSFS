@@ -5,6 +5,7 @@
 
 | Component | Upstream | License |
 |-----------|----------|---------|
+| WildKernels | [WildKernels/GKI_KernelSU_SUSFS](https://github.com/WildKernels/GKI_KernelSU_SUSFS) | GPL-3.0 |
 | Kernel Source | [kernel/common](https://android.googlesource.com/kernel/common) | GPL-2.0 |
 | KernelSU | [tiann/KernelSU](https://github.com/tiann/KernelSU) | GPL-3.0 |
 | KernelSU-Next | [KernelSU-Next/KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next) | GPL-3.0 |
