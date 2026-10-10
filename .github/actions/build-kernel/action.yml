@@ -103,8 +103,13 @@ runs:
             --copt=-mllvm \
             --copt=-inline-threshold=1000 \
             --copt=-mllvm \
+            --copt=-inlinehint-threshold=4000 \
+            --copt=-mllvm \
+            --copt=-unroll-threshold=600 \
+            --copt=-mllvm \
             --copt=-align-all-functions=6 \
-            --copt=-march=armv8.2-a+crypto+dotprod+fp16+rcpc \
+            --copt=-march=armv8.2-a+crypto+dotprod+fp16+rcpc+lse \
+            --copt=-mtune=cortex-a78 \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
             //common:kernel_aarch64/Image
