@@ -1,4 +1,4 @@
-Nekko Kernel GKI_KernelSU_SUSFS, WildKernels GKI_KernelSU_SUSFS — LICENSE
+Nekko Kernel GKI_KernelSU_SUSFS and WildKernels GKI_KernelSU_SUSFS — LICENSE
 
 This repository's own files (workflows, scripts, docs, kernel_patches where original)
 are licensed under GPL-3.0-or-later.
