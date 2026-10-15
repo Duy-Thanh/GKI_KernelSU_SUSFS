@@ -9,7 +9,7 @@ See [Installation](installation.md) for prerequisites, supported versions, and r
 ## Preparation
 
 1. Get your device's stock `boot.img`.
-2. Download the AnyKernel3 ZIP for your kernel version from [Releases](https://github.com/WildKernels/GKI_KernelSU_SUSFS/releases).
+2. Download the AnyKernel3 ZIP for your kernel version from [Releases](https://github.com/Duy-Thanh/GKI_KernelSU_SUSFS/releases).
 3. Unpack the ZIP and get the `Image` file (the KernelSU kernel).
 
 ---

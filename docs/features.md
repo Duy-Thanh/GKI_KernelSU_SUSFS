@@ -21,8 +21,8 @@ Kernel-based su and root access management for Android.
 | Feature | Description | Source |
 |---------|-------------|--------|
 | susfs4ksu | Root-hiding add-on for KernelSU using kernel patches and a userspace module. Recommended module: [sidex15/susfs4ksu-module](https://github.com/sidex15/susfs4ksu-module). | [simonpunk/susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) |
-| Ptrace Leak Fix | Fixes ptrace info leak on kernels older than 5.16. Internal to root hiding. | [patch](https://github.com/WildKernels/kernel_patches/blob/main/gki_ptrace.patch) |
-| Unicode Fix | Prevents path traversal via non-printable Unicode (experimental). Internal to root hiding. | [patch 6.1-](https://github.com/WildKernels/kernel_patches/blob/main/common/unicode_bypass_fix_6.1-.patch) · [patch 6.1+](https://github.com/WildKernels/kernel_patches/blob/main/common/unicode_bypass_fix_6.1+.patch) |
+| Ptrace Leak Fix | Fixes ptrace info leak on kernels older than 5.16. Internal to root hiding. | [patch](https://github.com/Duy-Thanh/kernel_patches/blob/main/gki_ptrace.patch) |
+| Unicode Fix | Prevents path traversal via non-printable Unicode (experimental). Internal to root hiding. | [patch 6.1-](https://github.com/Duy-Thanh/kernel_patches/blob/main/common/unicode_bypass_fix_6.1-.patch) · [patch 6.1+](https://github.com/Duy-Thanh/kernel_patches/blob/main/common/unicode_bypass_fix_6.1+.patch) |
 
 ---
 
@@ -79,8 +79,8 @@ Kernel-based su and root access management for Android.
 
 | Feature | Description | Source |
 |---------|-------------|--------|
-| NTSync | High-performance synchronization primitives compatible with Windows NT kernel API. | [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches/tree/main/common/ntsync) |
-| Performance Tuning | Kernel configuration and tuning options | [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches/tree/main/common) |
+| NTSync | High-performance synchronization primitives compatible with Windows NT kernel API. | [Duy-Thanh/kernel_patches](https://github.com/Duy-Thanh/kernel_patches/tree/main/common/ntsync) |
+| Performance Tuning | Kernel configuration and tuning options | [Duy-Thanh/kernel_patches](https://github.com/Duy-Thanh/kernel_patches/tree/main/common) |
 
 ---
 

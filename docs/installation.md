@@ -14,7 +14,7 @@
 
 - [ ] GKI 2.0 device with an unlocked bootloader
 - [ ] Full backup (at minimal the `boot` partition or have a stock unmodified `boot.img`)
-- [ ] Correct AnyKernel3 ZIP for your kernel version from [Releases](https://github.com/WildKernels/GKI_KernelSU_SUSFS/releases)
+- [ ] Correct AnyKernel3 ZIP for your kernel version from [Releases](https://github.com/Duy-Thanh/GKI_KernelSU_SUSFS/releases)
 
 ### Supported versions
 
