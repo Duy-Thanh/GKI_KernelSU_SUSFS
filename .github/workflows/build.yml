@@ -173,12 +173,26 @@ jobs:
         kernel_version: ${{ inputs.kernel_version }}
         os_patch_level: ${{ inputs.os_patch_level }}
 
+    # - name: Spoof /proc/config.gz With Stock Config
+    #   uses: ./.github/actions/stock-config
+    #   with:
+    #     version: ${{ inputs.version }}
+    #     page_size: ${{ inputs.page_size }}
+    #     stock_config_dir: stock-configs
+
     - name: Spoof /proc/config.gz With Stock Config
-      uses: ./.github/actions/stock-config
-      with:
-        version: ${{ inputs.version }}
-        page_size: ${{ inputs.page_size }}
-        stock_config_dir: stock-configs
+      shell: bash
+      run: |
+        echo "Spoof /proc/config.gz With Stock Config from upstream are DISABLED"
+        echo "This option may result in the loss of configuration or the overwriting"
+        echo "of the .config file, which could render root access and other software"
+        echo "non-functional"
+        echo
+        echo "This option will be DISABLED BY DEFAULT"
+        echo
+        echo "This option may be re-enabled in the future. Until it has been thoroughly"
+        echo "tested, those who wish to use it should uncomment the job named"
+        echo "'Spoof /proc/config.gz With Stock Config' in their own fork"
 
     - name: Set Build Timestamp from Kernel Commit
       shell: bash
