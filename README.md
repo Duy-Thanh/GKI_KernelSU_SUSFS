@@ -62,28 +62,12 @@ Fork the repository and follow **[Build Your Own Kernel](docs/build-from-fork.md
 
 **Contributors to this repository:**
 
-[![Contributors](https://contrib.rocks/image?repo=WildKernels/GKI_KernelSU_SUSFS)](https://github.com/WildKernels/GKI_KernelSU_SUSFS/graphs/contributors)
-
 Have an idea or improvement in mind? Contributions are always welcome — feel free to open a pull request or share your thoughts!
-
----
-
-## Community
-
-<div align="center">
-
-[![Telegram Group](https://img.shields.io/badge/Telegram-%40WildKernelsTG-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/WildKernelsTG)
-[![Telegram DM](https://img.shields.io/badge/Telegram-%40TheWildJames-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/TheWildJames)
-
-</div>
-
-Need help? Open an issue in this repository or reach out on Telegram. Please ask in the [WildKernelsTG group](https://t.me/WildKernelsTG) first for general issues. DMs to [@TheWildJames](https://t.me/TheWildJames) are always open — use for priority / very important, or if you just want to talk and learn.
-
----
 
 ## Donations
 
 > [!IMPORTANT]
+> **If you find this useful, please consider donating directly to the author who maintains the upstream repository: WildKernels (TheWildJames)**
 > **Kind note:** A donation is truly just a gift — not a payment for support, features, or priority. It doesn't unlock anything extra on our side and doesn't change how we help you; everyone gets the same community support whether you donate or not. Think of it as a kind “thank you” to help keep development going — not a transaction. If you do choose to give, we're genuinely grateful, but please never feel obligated.
 
 - PayPal: [bauhd@outlook.com](mailto:bauhd@outlook.com)
