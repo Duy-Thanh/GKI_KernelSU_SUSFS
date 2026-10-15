@@ -67,7 +67,7 @@ Have an idea or improvement in mind? Contributions are always welcome — feel f
 ## Donations
 
 > [!IMPORTANT]
-> **If you find this useful, please consider donating directly to the author who maintains the upstream repository: WildKernels (TheWildJames)**
+> **If you find this useful, please consider donating directly to the author who maintains the upstream repository: WildKernels (TheWildJames). Information for the upstream maintainer, WildKernels (TheWildJames), is provided below:**
 > 
 > **Kind note:** A donation is truly just a gift — not a payment for support, features, or priority. It doesn't unlock anything extra on our side and doesn't change how we help you; everyone gets the same community support whether you donate or not. Think of it as a kind “thank you” to help keep development going — not a transaction. If you do choose to give, we're genuinely grateful, but please never feel obligated.
 
