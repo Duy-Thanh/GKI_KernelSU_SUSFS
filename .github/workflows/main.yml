@@ -85,7 +85,7 @@ on:
           - SukiSU-Ultra
           - KowSU
           - No Root
-          - All (KernelSU-Next + KernelSU + ReSukiSU)
+          - All (KernelSU-Next + KernelSU + BakaSU)
         default: KernelSU-Next
       use_susfs:
         description: "SUSFS"
