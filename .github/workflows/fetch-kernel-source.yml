@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
           
-          echo "matrix=$ALL_TARGETS" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(echo "$ALL_TARGETS" | jq -c .)" >> "$GITHUB_OUTPUT"
           echo "Found $(echo "$ALL_TARGETS" | jq 'length') target(s)"
 
   fetch-kernel:
