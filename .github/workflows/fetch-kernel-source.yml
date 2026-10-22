@@ -57,14 +57,14 @@ jobs:
             fi
             
             TARGETS=$(jq -c --arg version "$VERSION" --arg android "$ANDROID_VERSION" --arg kernel "$KERNEL_VERSION" '
-              .include[] | {
+              [.include[] | {
                 version: $version,
                 android_version: $android,
                 kernel_version: $kernel,
                 sublevel: .sublevel,
                 os_patch_level: .date,
                 variant: (if .variant then .variant else "Normal" end)
-              }
+              }]
             ' "$config_file")
             
             ALL_TARGETS=$(echo "$ALL_TARGETS" "$TARGETS" | jq -s 'add')
