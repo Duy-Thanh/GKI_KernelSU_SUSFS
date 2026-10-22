@@ -136,7 +136,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           os_patch_level: ${{ matrix.os_patch_level }}
-          manifest_url: ${{ github.event.inputs.kernel_manifest_url }}
+          manifest_url: ${{ github.event.inputs.kernel_manifest_url != '' && github.event.inputs.kernel_manifest_url || 'https://android.googlesource.com/kernel/manifest' }}
 
       - name: Download Cached Kernel Source from Release
         if: ${{ inputs.use_cached_source }}
