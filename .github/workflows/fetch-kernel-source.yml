@@ -112,8 +112,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
-      - name: Create kernel directory
-        run: mkdir -p "${{ github.workspace }}/kernel"
+      - name: Setup Build Environment (install repo)
+        uses: ./.github/actions/setup-build-environment
+        with:
+          version: ${{ matrix.version }}
+          sublevel: ${{ matrix.sublevel }}
 
       - name: Download Kernel Source
         uses: ./.github/actions/download-kernel
