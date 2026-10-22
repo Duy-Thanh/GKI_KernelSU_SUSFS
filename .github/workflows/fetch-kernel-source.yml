@@ -4,20 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       kernel_version:
-        description: "Kernel version to fetch (empty = all from config)"
+        description: "Kernel version to fetch (empty = all from config). Format: androidXX-Y.Z (e.g., android15-6.6)"
         type: choice
         options:
           - ""
-          - 5.10.x-android12
-          - 5.10.x-android13
-          - 5.15.x-android13
-          - 5.15.x-android14
-          - 6.1.x-android14
-          - 6.6.x-android15
-          - 6.12.x-android16
-        default: "6.1.x-android14"
+          - android12-5.10
+          - android13-5.10
+          - android13-5.15
+          - android14-5.15
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+          - android17-6.18
+        default: ""
       os_patch_level:
-        description: "Patch level (YYYY-MM, sublevel, lts, or All)"
+        description: "Patch level (YYYY-MM, kernel sublevel, lts, or All for no filter)"
         type: string
         default: "All"
 
@@ -70,10 +71,10 @@ jobs:
             ALL_TARGETS=$(echo "$ALL_TARGETS" "$TARGETS" | jq -s 'add')
           done
           
-          # Filter by os_patch_level
+          # Filter by os_patch_level (same logic as prepare.yml)
           SELECTED_PATCH_LEVEL="${{ github.event.inputs.os_patch_level }}"
           SELECTED_PATCH_LEVEL=$(echo "$SELECTED_PATCH_LEVEL" | tr '[:upper:]' '[:lower:]')
-          if [ "$SELECTED_PATCH_LEVEL" = "all" ]; then
+          if [ "$SELECTED_PATCH_LEVEL" = "all" ] || [ -z "$SELECTED_PATCH_LEVEL" ]; then
             SELECTED_PATCH_LEVEL=""
           fi
           
@@ -114,11 +115,10 @@ jobs:
         uses: ./.github/actions/download-kernel
         with:
           version: ${{ matrix.version }}
-          android_version: ${{ matrix.android_version }}
-          kernel_version: ${{ matrix.kernel_version }}
           os_patch_level: ${{ matrix.os_patch_level }}
 
       - name: Create Kernel Source Archive
+        id: archive
         shell: bash
         working-directory: ${{ github.workspace }}/kernel
         run: |
@@ -160,6 +160,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Kernel Metadata
+        id: metadata
         shell: bash
         working-directory: ${{ github.workspace }}/kernel
         run: |
@@ -175,13 +176,13 @@ jobs:
             METADATA_FILE="${{ github.workspace }}/kernel-metadata-${VERSION}-${SUB}-${PATCH}-${VARIANT}.json"
           fi
           
-          # Capture commit info if available
-          COMMIT_SHA=""
+          # Capture commit info if available (from download-kernel action's env output)
+          COMMIT_SHA="${KERNEL_SOURCE_COMMIT:-}"
           COMMIT_DATE=""
           COMMIT_MSG=""
           if [ -d "common" ] && [ -d "common/.git" ]; then
             cd common
-            COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+            [ -z "$COMMIT_SHA" ] && COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
             COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "")
             COMMIT_MSG=$(git log -1 --format=%s 2>/dev/null || echo "")
             cd ..
@@ -215,6 +216,7 @@ jobs:
               repository: $repository
             }' > "$METADATA_FILE"
           
+          echo "METADATA_FILE=$METADATA_FILE" >> "$GITHUB_OUTPUT"
           echo "Metadata saved to $METADATA_FILE"
           cat "$METADATA_FILE"
 
@@ -222,7 +224,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: kernel-metadata-${{ matrix.version }}-${{ matrix.sublevel }}-${{ matrix.os_patch_level }}${{ matrix.variant != 'Normal' && format('-{0}', matrix.variant) || '' }}
-          path: ${{ github.workspace }}/kernel-metadata-*.json
+          path: ${{ steps.metadata.outputs.METADATA_FILE }}
           if-no-files-found: error
           compression-level: 9
           retention-days: 30
