@@ -112,6 +112,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
+      - name: Create kernel directory
+        run: mkdir -p "${{ github.workspace }}/kernel"
+
       - name: Download Kernel Source
         uses: ./.github/actions/download-kernel
         with:
