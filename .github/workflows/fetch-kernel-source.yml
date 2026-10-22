@@ -1,0 +1,217 @@
+name: Fetch Kernel Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Kernel version to fetch (empty = all from config)"
+        type: choice
+        options:
+          - ""
+          - 5.10.x-android12
+          - 5.10.x-android13
+          - 5.15.x-android13
+          - 5.15.x-android14
+          - 6.1.x-android14
+          - 6.6.x-android15
+          - 6.12.x-android16
+        default: "6.1.x-android14"
+      os_patch_level:
+        description: "Patch level (YYYY-MM, sublevel, lts, or All)"
+        type: string
+        default: "All"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  generate-matrix:
+    name: Generate Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.final.outputs.matrix }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Generate Matrix
+        id: final
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          # Read all config files
+          CONFIG_DIR=".github/config"
+          ALL_TARGETS="[]"
+          
+          for config_file in "$CONFIG_DIR"/android*.json; do
+            [ -f "$config_file" ] || continue
+            VERSION=$(jq -r '.version' "$config_file")
+            ANDROID_VERSION=$(echo "$VERSION" | cut -d- -f1)
+            KERNEL_VERSION=$(echo "$VERSION" | cut -d- -f2)
+            
+            # Filter by user selection if provided
+            if [ -n "${{ github.event.inputs.kernel_version }}" ] && [ "$VERSION" != "${{ github.event.inputs.kernel_version }}" ]; then
+              continue
+            fi
+            
+            TARGETS=$(jq -c --arg version "$VERSION" --arg android "$ANDROID_VERSION" --arg kernel "$KERNEL_VERSION" '
+              .include[] | {
+                version: $version,
+                android_version: $android,
+                kernel_version: $kernel,
+                sublevel: .sublevel,
+                os_patch_level: .date,
+                variant: (if .variant then .variant else "Normal" end)
+              }
+            ' "$config_file")
+            
+            ALL_TARGETS=$(echo "$ALL_TARGETS" "$TARGETS" | jq -s 'add')
+          done
+          
+          # Filter by os_patch_level
+          SELECTED_PATCH_LEVEL="${{ github.event.inputs.os_patch_level }}"
+          SELECTED_PATCH_LEVEL=$(echo "$SELECTED_PATCH_LEVEL" | tr '[:upper:]' '[:lower:]')
+          if [ "$SELECTED_PATCH_LEVEL" = "all" ]; then
+            SELECTED_PATCH_LEVEL=""
+          fi
+          
+          if [ -n "$SELECTED_PATCH_LEVEL" ]; then
+            FILTERED=$(echo "$ALL_TARGETS" | jq -c --arg patch "$SELECTED_PATCH_LEVEL" '
+              map(select(.os_patch_level == $patch))
+            ')
+            # Try as sublevel if no date match
+            if [ "$(echo "$FILTERED" | jq 'length')" -eq 0 ]; then
+              FILTERED=$(echo "$ALL_TARGETS" | jq -c --arg sublevel "$SELECTED_PATCH_LEVEL" '
+                map(select(.sublevel == $sublevel))
+              ')
+            fi
+            ALL_TARGETS="$FILTERED"
+          fi
+          
+          if [ "$(echo "$ALL_TARGETS" | jq 'length')" -eq 0 ]; then
+            echo "Error: no build targets match the criteria" >&2
+            exit 1
+          fi
+          
+          echo "matrix=$ALL_TARGETS" >> "$GITHUB_OUTPUT"
+          echo "Found $(echo "$ALL_TARGETS" | jq 'length') target(s)"
+
+  fetch-kernel:
+    name: Fetch Kernel Source
+    needs: generate-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Download Kernel Source
+        uses: ./.github/actions/download-kernel
+        with:
+          version: ${{ matrix.version }}
+          android_version: ${{ matrix.android_version }}
+          kernel_version: ${{ matrix.kernel_version }}
+          os_patch_level: ${{ matrix.os_patch_level }}
+
+      - name: Create Kernel Source Archive
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          
+          # Determine archive name
+          VERSION="${{ matrix.version }}"
+          SUB="${{ matrix.sublevel }}"
+          PATCH="${{ matrix.os_patch_level }}"
+          VARIANT="${{ matrix.variant }}"
+          
+          ARCHIVE_NAME="kernel-source-${VERSION}-${SUB}-${PATCH}"
+          if [ "$VARIANT" != "Normal" ]; then
+            ARCHIVE_NAME="${ARCHIVE_NAME}-${VARIANT}"
+          fi
+          
+          echo "Creating archive: ${ARCHIVE_NAME}.zip"
+          
+          # Zip the kernel source (excluding .repo to save space)
+          zip -r "${{ github.workspace }}/${ARCHIVE_NAME}.zip" . \
+            -x ".repo/*" \
+            -x "*.git/*" \
+            -x "out/*" \
+            -x "bazel-*" \
+            -x "*.log" \
+            -x "*.tmp" \
+            2>/dev/null
+          
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "Archive size: $(du -h "${{ github.workspace }}/${ARCHIVE_NAME}.zip" | cut -f1)"
+
+      - name: Upload Kernel Source Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.archive.outputs.ARCHIVE_NAME }}
+          path: ${{ github.workspace }}/${{ steps.archive.outputs.ARCHIVE_NAME }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload Kernel Metadata
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel
+        run: |
+          set -euo pipefail
+          
+          VERSION="${{ matrix.version }}"
+          SUB="${{ matrix.sublevel }}"
+          PATCH="${{ matrix.os_patch_level }}"
+          VARIANT="${{ matrix.variant }}"
+          
+          METADATA_FILE="${{ github.workspace }}/kernel-metadata-${VERSION}-${SUB}-${PATCH}.json"
+          if [ "$VARIANT" != "Normal" ]; then
+            METADATA_FILE="${{ github.workspace }}/kernel-metadata-${VERSION}-${SUB}-${PATCH}-${VARIANT}.json"
+          fi
+          
+          # Capture commit info if available
+          COMMIT_SHA=""
+          COMMIT_DATE=""
+          COMMIT_MSG=""
+          if [ -d "common" ] && [ -d "common/.git" ]; then
+            cd common
+            COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+            COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "")
+            COMMIT_MSG=$(git log -1 --format=%s 2>/dev/null || echo "")
+            cd ..
+          fi
+          
+          cat > "$METADATA_FILE" <<EOF
+{
+  "version": "$VERSION",
+  "android_version": "${{ matrix.android_version }}",
+  "kernel_version": "${{ matrix.kernel_version }}",
+  "sublevel": "$SUB",
+  "os_patch_level": "$PATCH",
+  "variant": "$VARIANT",
+  "commit_sha": "$COMMIT_SHA",
+  "commit_date": "$COMMIT_DATE",
+  "commit_message": "$COMMIT_MSG",
+  "fetched_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "workflow_run": "${{ github.run_id }}",
+  "repository": "${{ github.repository }}"
+}
+EOF
+          
+          echo "Metadata saved to $METADATA_FILE"
+          cat "$METADATA_FILE"
+
+      - name: Upload Kernel Metadata Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kernel-metadata-${{ matrix.version }}-${{ matrix.sublevel }}-${{ matrix.os_patch_level }}${{ matrix.variant != 'Normal' && format('-{0}', matrix.variant) || '' }}
+          path: ${{ github.workspace }}/kernel-metadata-*.json
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 30
