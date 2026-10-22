@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
           
-          echo "matrix=$(echo "$ALL_TARGETS" | jq -c .)" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(echo "$ALL_TARGETS" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
           echo "Found $(echo "$ALL_TARGETS" | jq 'length') target(s)"
 
   fetch-kernel:
@@ -106,7 +106,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.matrix).include }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
