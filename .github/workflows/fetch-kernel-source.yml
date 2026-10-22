@@ -21,6 +21,18 @@ on:
         description: "Patch level (YYYY-MM, kernel sublevel, lts, or All for no filter)"
         type: string
         default: "All"
+      kernel_manifest_url:
+        description: "Custom kernel manifest URL (default: googlesource). Use your fork URL to use modified kernel source."
+        type: string
+        default: ""
+      use_cached_source:
+        description: "Download pre-fetched kernel source from GitHub Releases instead of googlesource (requires prior fetch run)"
+        type: boolean
+        default: false
+      include_prebuilts:
+        description: "Include prebuilts (clang, pahole, etc.) in kernel source zip"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -120,9 +132,39 @@ jobs:
 
       - name: Download Kernel Source
         uses: ./.github/actions/download-kernel
+        if: ${{ !inputs.use_cached_source }}
         with:
           version: ${{ matrix.version }}
           os_patch_level: ${{ matrix.os_patch_level }}
+          manifest_url: ${{ github.event.inputs.kernel_manifest_url }}
+
+      - name: Download Cached Kernel Source from Release
+        if: ${{ inputs.use_cached_source }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ matrix.version }}"
+          SUB="${{ matrix.sublevel }}"
+          PATCH="${{ matrix.os_patch_level }}"
+          VARIANT="${{ matrix.variant }}"
+          
+          ARCHIVE_NAME="kernel-source-${VERSION}-${SUB}-${PATCH}"
+          if [ "$VARIANT" != "Normal" ]; then
+            ARCHIVE_NAME="${ARCHIVE_NAME}-${VARIANT}"
+          fi
+          
+          # Download from GitHub Releases (assuming you uploaded the zip there)
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/kernel-source/${ARCHIVE_NAME}.zip"
+          echo "Downloading from $RELEASE_URL"
+          curl -fsSL -o "${{ github.workspace }}/${ARCHIVE_NAME}.zip" "$RELEASE_URL" || {
+            echo "Failed to download cached source. Falling back to googlesource..."
+            exit 1
+          }
+          
+          mkdir -p "${{ github.workspace }}/kernel"
+          cd "${{ github.workspace }}/kernel"
+          unzip -q "${{ github.workspace }}/${ARCHIVE_NAME}.zip"
+          echo "Cached kernel source extracted"
 
       - name: Create Kernel Source Archive
         id: archive
@@ -144,15 +186,19 @@ jobs:
           
           echo "Creating archive: ${ARCHIVE_NAME}.zip"
           
-          # Zip the kernel source (excluding .repo to save space)
-          zip -r "${{ github.workspace }}/${ARCHIVE_NAME}.zip" . \
-            -x ".repo/*" \
-            -x "*.git/*" \
-            -x "out/*" \
-            -x "bazel-*" \
-            -x "*.log" \
-            -x "*.tmp" \
-            2>/dev/null
+          EXCLUDE_ARGS=(
+            -x ".repo/*"
+            -x "*.git/*"
+            -x "out/*"
+            -x "bazel-*"
+            -x "*.log"
+            -x "*.tmp"
+          )
+          if [ "${{ github.event.inputs.include_prebuilts }}" != "true" ]; then
+            EXCLUDE_ARGS+=(-x "prebuilts/*")
+          fi
+          
+          zip -r "${{ github.workspace }}/${ARCHIVE_NAME}.zip" . "${EXCLUDE_ARGS[@]}" 2>/dev/null
           
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}.zip" >> "$GITHUB_OUTPUT"
           echo "Archive size: $(du -h "${{ github.workspace }}/${ARCHIVE_NAME}.zip" | cut -f1)"

@@ -14,6 +14,10 @@ inputs:
   os_patch_level:
     description: 'OS patch level (e.g., 2024-01)'
     required: true
+  manifest_url:
+    description: 'Custom manifest URL (default: https://android.googlesource.com/kernel/manifest)'
+    required: false
+    default: 'https://android.googlesource.com/kernel/manifest'
 
 outputs:
   deprecated_branch:
@@ -45,8 +49,11 @@ runs:
           if [ "$depth" != "0" ]; then
             depth_flag="--depth=${depth}"
           fi
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH} ${depth_flag} || { echo "ERROR: repo init failed" >&2; return 1; }
-          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH}) || { echo "ERROR: git ls-remote failed" >&2; return 1; }
+          MANIFEST_URL="${{ inputs.manifest_url }}"
+          repo init -u "${MANIFEST_URL}" -b common-${FORMATTED_BRANCH} ${depth_flag} || { echo "ERROR: repo init failed" >&2; return 1; }
+          # Extract kernel common URL from manifest URL (replace /manifest with /common)
+          KERNEL_COMMON_URL="${MANIFEST_URL%/manifest}/common"
+          REMOTE_BRANCH=$(git ls-remote "${KERNEL_COMMON_URL}" ${FORMATTED_BRANCH}) || { echo "ERROR: git ls-remote failed" >&2; return 1; }
           DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
           DEPRECATED=false
           if grep -q deprecated <<< "$REMOTE_BRANCH"; then
@@ -61,7 +68,7 @@ runs:
           # build keeps working. Tags are never deleted.
           TAG_FALLBACK=""
           if [ "$DEPRECATED" = "false" ] && [ -z "$REMOTE_BRANCH" ]; then
-            LATEST_TAG=$(git ls-remote https://android.googlesource.com/kernel/common "refs/tags/${FORMATTED_BRANCH}_r*" 2>/dev/null | awk '{print $2}' | grep -v '\^{}$' | sed 's|refs/tags/||' | awk -F'_r' '{print $NF+0, $0}' | sort -n | tail -n 1 | cut -d' ' -f2- || true)
+            LATEST_TAG=$(git ls-remote "${KERNEL_COMMON_URL}" "refs/tags/${FORMATTED_BRANCH}_r*" 2>/dev/null | awk '{print $2}' | grep -v '\^{}$' | sed 's|refs/tags/||' | awk -F'_r' '{print $NF+0, $0}' | sort -n | tail -n 1 | cut -d' ' -f2- || true)
             if [ -n "$LATEST_TAG" ]; then
               echo "[!] Note: Branch ${FORMATTED_BRANCH} head missing upstream; using tag ${LATEST_TAG}."
               # repo resolves revision as a branch name unless given a full
