@@ -187,22 +187,33 @@ jobs:
             cd ..
           fi
           
-          cat > "$METADATA_FILE" <<EOF
-{
-  "version": "$VERSION",
-  "android_version": "${{ matrix.android_version }}",
-  "kernel_version": "${{ matrix.kernel_version }}",
-  "sublevel": "$SUB",
-  "os_patch_level": "$PATCH",
-  "variant": "$VARIANT",
-  "commit_sha": "$COMMIT_SHA",
-  "commit_date": "$COMMIT_DATE",
-  "commit_message": "$COMMIT_MSG",
-  "fetched_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "workflow_run": "${{ github.run_id }}",
-  "repository": "${{ github.repository }}"
-}
-EOF
+          jq -n \
+            --arg version "$VERSION" \
+            --arg android_version "${{ matrix.android_version }}" \
+            --arg kernel_version "${{ matrix.kernel_version }}" \
+            --arg sublevel "$SUB" \
+            --arg os_patch_level "$PATCH" \
+            --arg variant "$VARIANT" \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg commit_date "$COMMIT_DATE" \
+            --arg commit_message "$COMMIT_MSG" \
+            --arg fetched_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg workflow_run "${{ github.run_id }}" \
+            --arg repository "${{ github.repository }}" \
+            '{
+              version: $version,
+              android_version: $android_version,
+              kernel_version: $kernel_version,
+              sublevel: $sublevel,
+              os_patch_level: $os_patch_level,
+              variant: $variant,
+              commit_sha: $commit_sha,
+              commit_date: $commit_date,
+              commit_message: $commit_message,
+              fetched_at: $fetched_at,
+              workflow_run: $workflow_run,
+              repository: $repository
+            }' > "$METADATA_FILE"
           
           echo "Metadata saved to $METADATA_FILE"
           cat "$METADATA_FILE"
