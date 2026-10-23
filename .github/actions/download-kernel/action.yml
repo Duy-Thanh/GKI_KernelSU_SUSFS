@@ -56,11 +56,10 @@ runs:
           MANIFEST_URL="${{ inputs.manifest_url }}"
           GITHUB_TOKEN="${{ inputs.github_token }}"
           
-          # If manifest_url is a GitHub HTTPS URL and we have a token, configure git credentials
-          if [ -n "$GITHUB_TOKEN" ] && [[ "$MANIFEST_URL" == https://github.com/* ]]; then
-            # Configure git to use token for github.com
-            git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
-            echo "[*] Configured git credentials for GitHub"
+          # If github_token is provided, force git to use insteadOf for all github.com URLs
+          if [ -n "$GITHUB_TOKEN" ]; then
+            git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+            echo "[*] Configured Git insteadOf rule with GitHub token"
           fi
           
           repo init -u "${MANIFEST_URL}" -b common-${FORMATTED_BRANCH} ${depth_flag} || { echo "ERROR: repo init failed" >&2; return 1; }
@@ -75,17 +74,12 @@ runs:
             DEPRECATED=true
           fi
           echo "deprecated=$DEPRECATED" >> $GITHUB_OUTPUT
-          # Google retires old monthly heads entirely (neither live nor
-          # deprecated/); the manifest still pins common to the dead
-          # branch. Fall back to the latest immutable release tag so the
-          # build keeps working. Tags are never deleted.
+
           TAG_FALLBACK=""
           if [ "$DEPRECATED" = "false" ] && [ -z "$REMOTE_BRANCH" ]; then
             LATEST_TAG=$(git ls-remote "${KERNEL_COMMON_URL}" "refs/tags/${FORMATTED_BRANCH}_r*" 2>/dev/null | awk '{print $2}' | grep -v '\^{}$' | sed 's|refs/tags/||' | awk -F'_r' '{print $NF+0, $0}' | sort -n | tail -n 1 | cut -d' ' -f2- || true)
             if [ -n "$LATEST_TAG" ]; then
               echo "[!] Note: Branch ${FORMATTED_BRANCH} head missing upstream; using tag ${LATEST_TAG}."
-              # repo resolves revision as a branch name unless given a full
-              # ref path, so pin the tag explicitly as refs/tags/... .
               sed -i "/path=\"common\"/ s|revision=\"${FORMATTED_BRANCH}\"|revision=\"refs/tags/${LATEST_TAG}\"|" "$DEFAULT_MANIFEST_PATH"
               TAG_FALLBACK="$LATEST_TAG"
             else
@@ -95,32 +89,12 @@ runs:
           echo "tag_fallback=$TAG_FALLBACK" >> $GITHUB_OUTPUT
         }
 
-        # Retry policy: googlesource periodically serves deprecated branches
-        # at ZERO progress - the fetch hangs with no bytes and only dies when
-        # the timeout wrapper kills it 15 minutes later (run 37814552622,
-        # android13-5.10-2022-05: 3 x 15m stalls, all dead time). Two fixes:
-        #   1. git's own lowSpeed abort (http.lowSpeedLimit/lowSpeedTime):
-        #      die after 60s below 1KB/s instead of idling to the wall clock,
-        #      so a stalled attempt costs ~1-2 min, not 15.
-        #   2. With cheap attempts, afford 5 rounds instead of 3 - the first
-        #      stalled fetch often triggers upstream rehydration of the cold
-        #      branch, so a later attempt can catch the warmed cache (the
-        #      2022-05 branch's neighbours in the same run all synced fine).
-        # Backoff graduates 15s/30s/60s/120s/240s so a genuinely bad serving
-        # window gets spaced-out retries rather than rapid-fire reruns.
         MAX_RETRIES=5
         SYNC_TIMEOUT="15m"
         RETRY_DELAYS=(15 30 60 120 240)
         attempt=1
-        # Always shallow: the build only needs the branch tip. Deeper retries
-        # just download more data into a strained runner (slower + more disk).
         DEPTHS=(1 1 1 1 1)
 
-        # Applied via git's env-config mechanism (GIT_CONFIG_KEY/VALUE pairs,
-        # inherited by every git repo sync spawns - repo has no -c passthrough
-        # of its own; verified against the repo launcher source). The lowSpeed
-        # pair only fires on transfer stalls (no server progress), never on a
-        # legitimately slow-but-moving fetch of a big repo.
         export GIT_CONFIG_COUNT=2
         export GIT_CONFIG_KEY_0=http.lowSpeedLimit
         export GIT_CONFIG_VALUE_0=1024
@@ -130,9 +104,6 @@ runs:
         clean_workspace() {
           echo "Disk before cleanup:"
           df -h "$PWD" | tail -n +2 || true
-          # Remove repo metadata AND any half-checked-out project dirs from the
-          # previous attempt. Deleting only .repo leaves stale checkouts behind
-          # and every later sync fails with "Checking out local projects failed".
           find "$PWD" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           echo "Disk after cleanup:"
           df -h "$PWD" | tail -n +2 || true
@@ -143,12 +114,6 @@ runs:
           echo "Attempt $attempt/$MAX_RETRIES: initialize and sync kernel repository (depth=${CURRENT_DEPTH}, sync timeout $SYNC_TIMEOUT, stall abort: <1KB/s for 60s)..."
           df -h "$PWD" | tail -n +2 || true
           if init_repo "$CURRENT_DEPTH"; then
-            # Use minimal-shallow variant: current-branch, shallow init done above, reduce files downloaded
-            # Tag revisions are not fetched when --no-tags is set.
-            # GIT_CONFIG_* env vars (exported above) are inherited by repo's
-            # inner git: the lowSpeed pair turns the zero-progress
-            # deprecated-branch stall into a fast failure (~60s) instead of
-            # idling until the 15m wall.
             SYNC_TAG_FLAGS="--no-tags"
             if [ -n "$TAG_FALLBACK" ]; then SYNC_TAG_FLAGS=""; fi
             if timeout $SYNC_TIMEOUT repo sync -c --current-branch --no-clone-bundle $SYNC_TAG_FLAGS --jobs-checkout=4 -j4; then
@@ -179,43 +144,6 @@ runs:
           attempt=$((attempt+1))
         done
 
-    # --- Non-repo steps (commented out; we only use repo now) ---
-    # - name: Download manifest.xml for branch (with deprecated fallback)
-    #   shell: bash
-    #   working-directory: ${{ github.workspace }}/kernel
-    #   run: |
-    #     set -euo pipefail
-    #     VERSION="${{ inputs.version }}"
-    #     ANDROID_PART=$(echo "$VERSION" | cut -d- -f1)
-    #     KERNEL_PART=$(echo "$VERSION" | cut -d- -f2)
-    #     FORMATTED_BRANCH="${ANDROID_PART}-${KERNEL_PART}-${{ inputs.os_patch_level }}"
-    #     MAIN_MANIFEST_URL="https://android.googlesource.com/kernel/manifest/+/refs/heads/common-${FORMATTED_BRANCH}/default.xml?format=TEXT"
-    #     DEPRECATED_MANIFEST_URL="https://android.googlesource.com/kernel/manifest/+/refs/heads/deprecated/common-${FORMATTED_BRANCH}/default.xml?format=TEXT"
-    #     echo "Trying to fetch manifest from $MAIN_MANIFEST_URL"
-    #     if curl -fsSL "$MAIN_MANIFEST_URL" | base64 -d > manifest.xml; then
-    #       echo "Fetched manifest from $MAIN_MANIFEST_URL"
-    #     else
-    #       echo "Main manifest fetch failed, trying deprecated branch."
-    #       echo "[!] Note: Branch common-${FORMATTED_BRANCH} is considered deprecated."
-    #       if curl -fsSL "$DEPRECATED_MANIFEST_URL" | base64 -d > manifest.xml; then
-    #         echo "Fetched manifest from $DEPRECATED_MANIFEST_URL"
-    #       else
-    #         echo "ERROR: Neither main nor deprecated branch exists for $FORMATTED_BRANCH" >&2
-    #         exit 22
-    #       fi
-    #     fi
-    #
-    # - name: Debug Show manifest.xml
-    #   shell: bash
-    #   working-directory: ${{ github.workspace }}/kernel
-    #   run: cat manifest.xml
-    #
-    # - name: Fast Parallel Archive Download
-    #   shell: bash
-    #   working-directory: ${{ github.workspace }}/kernel
-    #   run: |
-    #     python "${{ github.workspace }}/.github/actions/download-kernel/fast_parallel_download.py"
-
     - name: Capture Kernel Common Commit Metadata
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
@@ -242,3 +170,4 @@ runs:
         echo "Kernel common commit date: $COMMIT_DATE"
         echo "Kernel common commit msg: $COMMIT_MSG"
         echo "Kernel common commit SHA: $COMMIT_SHA"
+ 
