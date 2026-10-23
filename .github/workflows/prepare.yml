@@ -91,6 +91,11 @@ on:
         required: false
         type: string
         default: "4k"
+      manifest_url:
+        description: "Custom kernel manifest URL (default: googlesource)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   generate-matrix:
@@ -341,11 +346,12 @@ jobs:
       nomount_commit: ${{ inputs.nomount_commit }}
       kernel_patches_commit: ${{ inputs.kernel_patches_commit }}
       anykernel3_commit: ${{ inputs.anykernel3_commit }}
-      droidspaces_commit: ${{ inputs.droidspaces_commit }}
-      brand_name: ${{ inputs.brand_name }}
-      keep_kmi: ${{ inputs.keep_kmi }}
-      allow_version_mismatch: ${{ inputs.allow_version_mismatch }}
-      use_cache: ${{ inputs.use_cache }}
-      page_size: ${{ inputs.page_size }}
-      stock_config_artifact: stock-configs-${{ needs.generate-matrix.outputs.version_slug }}
-    secrets: inherit
+droidspaces_commit: ${{ inputs.droidspaces_commit }}
+       brand_name: ${{ inputs.brand_name }}
+       keep_kmi: ${{ inputs.keep_kmi }}
+       allow_version_mismatch: ${{ inputs.allow_version_mismatch }}
+       use_cache: ${{ inputs.use_cache }}
+       page_size: ${{ inputs.page_size }}
+       manifest_url: ${{ inputs.manifest_url }}
+       stock_config_artifact: stock-configs-${{ needs.generate-matrix.outputs.version_slug }}
+     secrets: inherit
