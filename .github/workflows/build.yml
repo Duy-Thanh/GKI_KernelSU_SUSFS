@@ -178,7 +178,7 @@ jobs:
         kernel_version: ${{ inputs.kernel_version }}
         os_patch_level: ${{ inputs.os_patch_level }}
         manifest_url: ${{ inputs.manifest_url }}
-        github_token: ${{ github.token }}
+        github_token: ${{ secrets.KERNEL_MANIFEST_TOKEN || github.token }}
 
     # - name: Spoof /proc/config.gz With Stock Config
     #   uses: ./.github/actions/stock-config
