@@ -1,0 +1,67 @@
+name: Sync Kernel Forks from Google
+
+on:
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: "Comma-separated GitHub repo names to sync (e.g., android_kernel_common,android_kernel_manifest)"
+        type: string
+        default: "android_kernel_common"
+      upstream_owner:
+        description: "Upstream owner on googlesource"
+        type: string
+        default: "android.googlesource.com"
+      upstream_repos:
+        description: "Comma-separated upstream paths matching repos order (e.g., kernel/common,kernel/manifest)"
+        type: string
+        default: "kernel/common"
+  schedule:
+    - cron: '0 3 * * 0'  # Weekly Sunday 3am UTC
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync repos
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Parse repo lists
+        id: parse
+        run: |
+          REPOS="${{ github.event.inputs.repos || 'android_kernel_common,android_kernel_manifest' }}"
+          UPSTREAM_REPOS="${{ github.event.inputs.upstream_repos || 'kernel/common,kernel/manifest' }}"
+          echo "repos=$(echo "$REPOS" | sed 's/,/ /g')" >> "$GITHUB_OUTPUT"
+          echo "upstream_repos=$(echo "$UPSTREAM_REPOS" | sed 's/,/ /g')" >> "$GITHUB_OUTPUT"
+
+      - name: Sync each repo
+        run: |
+          REPOS=(${{ steps.parse.outputs.repos }})
+          UPSTREAM_REPOS=(${{ steps.parse.outputs.upstream_repos }})
+          
+          for i in "${!REPOS[@]}"; do
+            REPO="${REPOS[i]}"
+            UPSTREAM_REPO="${UPSTREAM_REPOS[i]}"
+            
+            echo "=== Syncing $REPO -> $UPSTREAM_REPO ==="
+            cd /tmp
+            rm -rf "sync_$REPO"
+            git clone --bare "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/$REPO.git" "sync_$REPO"
+            cd "sync_$REPO"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            UPSTREAM="https://${{ github.event.inputs.upstream_owner }}/$UPSTREAM_REPO"
+            git remote add upstream "$UPSTREAM"
+            git fetch upstream --prune --tags --force
+            
+            git push origin "refs/remotes/upstream/*:refs/heads/*" --force
+            git push origin "refs/tags/*:refs/tags/*" --force
+            git push origin --prune
+            
+            echo "=== $REPO synced ==="
+            git branch -r | head -10
+            git tag -l | sort -V | tail -5
+            echo ""
+          done
