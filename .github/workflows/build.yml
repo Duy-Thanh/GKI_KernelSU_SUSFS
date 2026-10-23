@@ -86,6 +86,11 @@ on:
         required: false
         type: string
         default: ""
+      manifest_url:
+        description: "Custom kernel manifest URL (default: googlesource)"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build-gki:
@@ -172,6 +177,7 @@ jobs:
         android_version: ${{ inputs.android_version }}
         kernel_version: ${{ inputs.kernel_version }}
         os_patch_level: ${{ inputs.os_patch_level }}
+        manifest_url: ${{ inputs.manifest_url }}
 
     # - name: Spoof /proc/config.gz With Stock Config
     #   uses: ./.github/actions/stock-config
