@@ -63,8 +63,17 @@ runs:
           fi
           
           repo init -u "${MANIFEST_URL}" -b common-${FORMATTED_BRANCH} ${depth_flag} || { echo "ERROR: repo init failed" >&2; return 1; }
-          # Extract kernel common URL from manifest URL (replace /manifest with /common)
-          KERNEL_COMMON_URL="${MANIFEST_URL%/manifest}/common"
+          if [[ "$MANIFEST_URL" == *github.com* ]]; then
+            if [[ "$MANIFEST_URL" == *_manifest* ]]; then
+              KERNEL_COMMON_URL="${MANIFEST_URL%_manifest}_common"
+            else
+              KERNEL_COMMON_URL="${MANIFEST_URL%/manifest}/common"
+            fi
+          else
+            KERNEL_COMMON_URL="${MANIFEST_URL%/manifest}/common"
+          fi
+          
+          echo "[*] Resolved Kernel Common URL: ${KERNEL_COMMON_URL}"
           REMOTE_BRANCH=$(git ls-remote "${KERNEL_COMMON_URL}" ${FORMATTED_BRANCH}) || { echo "ERROR: git ls-remote failed" >&2; return 1; }
           DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
           DEPRECATED=false
