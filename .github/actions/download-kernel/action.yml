@@ -56,19 +56,16 @@ runs:
           MANIFEST_URL="${{ inputs.manifest_url }}"
           GITHUB_TOKEN="${{ inputs.github_token }}"
           
-          # If manifest_url is a GitHub HTTPS URL and we have a token, inject credentials
+          # If manifest_url is a GitHub HTTPS URL and we have a token, configure git credentials
           if [ -n "$GITHUB_TOKEN" ] && [[ "$MANIFEST_URL" == https://github.com/* ]]; then
-            MANIFEST_URL="https://${GITHUB_TOKEN}@${MANIFEST_URL#https://}"
-            echo "[*] Using authenticated GitHub URL for manifest"
+            # Configure git to use token for github.com
+            git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+            echo "[*] Configured git credentials for GitHub"
           fi
           
           repo init -u "${MANIFEST_URL}" -b common-${FORMATTED_BRANCH} ${depth_flag} || { echo "ERROR: repo init failed" >&2; return 1; }
           # Extract kernel common URL from manifest URL (replace /manifest with /common)
           KERNEL_COMMON_URL="${MANIFEST_URL%/manifest}/common"
-          # Also use token for kernel common URL if it's GitHub
-          if [ -n "$GITHUB_TOKEN" ] && [[ "$KERNEL_COMMON_URL" == https://github.com/* ]]; then
-            KERNEL_COMMON_URL="https://${GITHUB_TOKEN}@${KERNEL_COMMON_URL#https://}"
-          fi
           REMOTE_BRANCH=$(git ls-remote "${KERNEL_COMMON_URL}" ${FORMATTED_BRANCH}) || { echo "ERROR: git ls-remote failed" >&2; return 1; }
           DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
           DEPRECATED=false
