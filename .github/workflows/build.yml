@@ -155,24 +155,24 @@ jobs:
         with:
           swap-size-gb: 16
 
-    - name: Setup Build Environment
-      uses: ./.github/actions/setup-build-environment
-      with:
-        version: ${{ inputs.version }}
-        sublevel: ${{ inputs.sublevel }}
-        kernel_patches_commit: ${{ inputs.kernel_patches_commit }}
-        anykernel3_commit: ${{ inputs.anykernel3_commit }}
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+        with:
+          version: ${{ inputs.version }}
+          sublevel: ${{ inputs.sublevel }}
+          kernel_patches_commit: ${{ inputs.kernel_patches_commit }}
+          anykernel3_commit: ${{ inputs.anykernel3_commit }}
           
-    - name: Download Kernel Repository
-      uses: ./.github/actions/download-kernel
-      with:
-        version: ${{ inputs.version }}
-        android_version: ${{ inputs.android_version }}
-        kernel_version: ${{ inputs.kernel_version }}
-        os_patch_level: ${{ inputs.os_patch_level }}
-        manifest_url: ${{ inputs.manifest_url }}
-        github_token: ${{ secrets.KERNEL_MANIFEST_TOKEN || github.token }}
-
+      - name: Download Kernel Repository
+        uses: ./.github/actions/download-kernel
+        with:
+          version: ${{ inputs.version }}
+          android_version: ${{ inputs.android_version }}
+          kernel_version: ${{ inputs.kernel_version }}
+          os_patch_level: ${{ inputs.os_patch_level }}
+          manifest_url: ${{ inputs.manifest_url }}
+          github_token: ${{ secrets.KERNEL_MANIFEST_TOKEN || github.token }}
+  
     # - name: Spoof /proc/config.gz With Stock Config
     #   uses: ./.github/actions/stock-config
     #   with:
@@ -180,19 +180,19 @@ jobs:
     #     page_size: ${{ inputs.page_size }}
     #     stock_config_dir: stock-configs
 
-    - name: Spoof /proc/config.gz With Stock Config
-      shell: bash
-      run: |
-        echo "Spoof /proc/config.gz With Stock Config from upstream are DISABLED"
-        echo "This option may result in the loss of configuration or the overwriting"
-        echo "of the .config file, which could render root access and other software"
-        echo "non-functional"
-        echo
-        echo "This option will be DISABLED BY DEFAULT"
-        echo
-        echo "This option may be re-enabled in the future. Until it has been thoroughly"
-        echo "tested, those who wish to use it should uncomment the job named"
-        echo "'Spoof /proc/config.gz With Stock Config' in their own fork"
+      - name: Spoof /proc/config.gz With Stock Config
+        shell: bash
+        run: |
+          echo "Spoof /proc/config.gz With Stock Config from upstream are DISABLED"
+          echo "This option may result in the loss of configuration or the overwriting"
+          echo "of the .config file, which could render root access and other software"
+          echo "non-functional"
+          echo
+          echo "This option will be DISABLED BY DEFAULT"
+          echo
+          echo "This option may be re-enabled in the future. Until it has been thoroughly"
+          echo "tested, those who wish to use it should uncomment the job named"
+          echo "'Spoof /proc/config.gz With Stock Config' in their own fork"
 
       - name: Set Build Timestamp from Kernel Commit
         shell: bash
