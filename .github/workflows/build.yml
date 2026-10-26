@@ -699,13 +699,21 @@ jobs:
             fi
           } > "$SUMMARY_FILE"
 
-      - name: Upload Artifacts
+      - name: Upload AnyKernel3 Artifacts
         id: kernel-artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.extract.outputs.file_name }}-AnyKernel3
           path: ${{ github.workspace }}/AnyKernel3/**
           if-no-files-found: ignore
+          compression-level: 9
+
+      - name: Upload Custom Module (.ko)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.extract.outputs.file_name }}-nekkodrv
+          path: ${{ github.workspace }}/nekkodrv.ko
+          if-no-files-found: warn
           compression-level: 9
 
       - name: Write Build-verified only artifact metadata
