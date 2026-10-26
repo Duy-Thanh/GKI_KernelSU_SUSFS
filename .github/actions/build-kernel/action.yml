@@ -112,7 +112,8 @@ runs:
             --copt=-mtune=cortex-a78 \
             "${PAGE_SIZE_FLAGS[@]}" \
             --disk_cache=/home/runner/.cache/bazel \
-            //common:kernel_aarch64/Image
+            //common:kernel_aarch64/Image \
+            //common:kernel_aarch64_modules
         fi
 
     - name: 'Verify Page Size in Generated .config'
