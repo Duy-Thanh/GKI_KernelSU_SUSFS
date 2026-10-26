@@ -180,6 +180,12 @@ jobs:
     #     page_size: ${{ inputs.page_size }}
     #     stock_config_dir: stock-configs
 
+      - name: Enable new drivers for custom NekkoHV
+        uses: ./.github/actions/set-kernel-config
+        with:
+          config_list: |
+            CONFIG_NEKKODRV_MODULE=m
+      
       - name: Spoof /proc/config.gz With Stock Config
         shell: bash
         run: |
