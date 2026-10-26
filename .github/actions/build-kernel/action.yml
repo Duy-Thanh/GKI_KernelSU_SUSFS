@@ -209,5 +209,12 @@ runs:
           cp "/home/runner/out/dist/Image" "${{ github.workspace }}/AnyKernel3/Image"
           exit 0
         fi
+        MODULE_KO="$(find bazel-bin/ -name "nekkodrv_module.ko" -type f | head -n1 || true)"
+        if [ -n "$MODULE_KO" ]; then
+          echo "Found module at $MODULE_KO"
+          cp "$MODULE_KO" "${{ github.workspace }}/nekkodrv_module.ko"
+        else
+          echo "WARNING: nekkodrv_module.ko not found in bazel-bin"
+        fi
 
         exit 1
