@@ -202,12 +202,10 @@ runs:
         if [ -f "bazel-bin/common/kernel_aarch64/Image" ]; then
           echo "Found Image at bazel-bin/common/kernel_aarch64/Image"
           cp "bazel-bin/common/kernel_aarch64/Image" "${{ github.workspace }}/AnyKernel3/Image"
-          exit 0
         fi
         if [ -f "/home/runner/out/dist/Image" ]; then
           echo "Found Image at /home/runner/out/dist/Image"
           cp "/home/runner/out/dist/Image" "${{ github.workspace }}/AnyKernel3/Image"
-          exit 0
         fi
         echo "[*] Searching for nekkodrv.ko across the entire runner space..."
         
@@ -221,7 +219,6 @@ runs:
           echo "[-] File not found!" >&2
           echo "=== Debugging file system context ===" >&2
           find "${{ github.workspace }}" -maxdepth 3 -type d || true
-          exit 1
         fi
 
         exit 1
