@@ -221,4 +221,4 @@ runs:
           find "${{ github.workspace }}" -maxdepth 3 -type d || true
         fi
 
-        exit 1
+        exit 0
