@@ -31,4 +31,8 @@ runs:
           CONFIG_KALLSYMS_ALL=y
           CONFIG_FANOTIFY=y
           CONFIG_FANOTIFY_ACCESS_PERMISSIONS=y
-          
+          # KEXEC: boot a new kernel from the running one (kexec_load +
+          # kexec_file_load). KEXEC_FILE is the syscall usable under a locked-
+          # down GKI since kexec_load is commonly restricted.
+          CONFIG_KEXEC=y
+          CONFIG_KEXEC_FILE=y
