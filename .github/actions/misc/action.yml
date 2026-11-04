@@ -29,4 +29,8 @@ runs:
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_KALLSYMS=y
           CONFIG_KALLSYMS_ALL=y
-          
+          # KEXEC: boot a new kernel from the running one (kexec_load +
+          # kexec_file_load). KEXEC_FILE is the syscall usable under a locked-
+          # down GKI since kexec_load is commonly restricted.
+          CONFIG_KEXEC=y
+          CONFIG_KEXEC_FILE=y
