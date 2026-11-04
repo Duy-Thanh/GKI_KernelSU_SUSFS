@@ -519,52 +519,6 @@ jobs:
           if-no-files-found: ignore
           compression-level: 9
 
-      - name: "Setup Cache and Build Environment"
-        if: inputs.use_cache
-        uses: ./.github/actions/cache-setup
-        with:
-          version: ${{ inputs.version }}
-          android_version: ${{ inputs.android_version }}
-          kernel_version: ${{ inputs.kernel_version }}
-          sublevel: ${{ steps.extract.outputs.sublevel }}
-
-      - name: Restore ccache
-        id: restore-ccache
-        continue-on-error: true
-        if: inputs.use_cache && (inputs.version == 'android12-5.10' || inputs.version == 'android13-5.10' || inputs.version == 'android13-5.15')
-        uses: ./.github/actions/cache-restore
-        with:
-          cache_path: /home/runner/.ccache
-          cache_key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.os_patch_level }}-${{ inputs.variant }}
-          cache_bucket: ccache-cache-${{ inputs.version }}-${{ inputs.variant }}
-          restore_keys: |
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-
-
-      - name: Restore bazel-cache
-        id: restore-bazel
-        continue-on-error: true
-        if: inputs.use_cache && (inputs.version == 'android14-5.15' || inputs.version == 'android14-6.1' || inputs.version == 'android15-6.6' || inputs.version == 'android16-6.12')
-        uses: ./.github/actions/cache-restore
-        with:
-          cache_path: /home/runner/.cache/bazel
-          cache_key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.os_patch_level }}-${{ inputs.variant }}${{ inputs.page_size == '16k' && '-16k' || '' }}
-          cache_bucket: bazel-cache-${{ inputs.version }}-${{ inputs.variant }}${{ inputs.page_size == '16k' && '-16k' || '' }}
-          restore_keys: |
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-
-
-      - name: Check cache hit
-        run: |
-          echo "Cache restore status:"
-          CCACHE_HIT="${{ steps.restore-ccache.outputs.cache-hit || 'skipped' }}"
-          BAZEL_HIT="${{ steps.restore-bazel.outputs.cache-hit || 'skipped' }}"
-          echo "  ccache: $CCACHE_HIT"
-          echo "  bazel: $BAZEL_HIT"
-
-      - name: Get Cache Stats
-        uses: ./.github/actions/cache-stats
-        with:
-          clear_stats: true
-
     # - name: Initialize Config Fragment
     #   run: touch "${{ github.workspace }}/wild_gki.fragment"
 

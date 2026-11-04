@@ -3,11 +3,11 @@ description: 'Initialize and sync Android kernel source repository'
 
 inputs:
   android_version:
-    description: 'Android version (e.g., android14)'
-    required: true
+    description: 'Android version (e.g., android14) - informational; the body derives everything from `version`'
+    required: false
   kernel_version:
-    description: 'Kernel version (e.g., 5.15, 6.1)'
-    required: true
+    description: 'Kernel version (e.g., 5.15, 6.1) - informational; the body derives everything from `version`'
+    required: false
   version:
     description: 'Combined version (e.g., android14-6.1)'
     required: true
