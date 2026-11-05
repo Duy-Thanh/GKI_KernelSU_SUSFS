@@ -1,15 +1,6 @@
 name: 'Release From Existing Run'
 description: 'Build a release from the artifacts of a previous Build Kernels run, without rebuilding'
 
-inputs:
-  source_run_id:
-    description: 'Run ID of the completed Build Kernels run to publish from'
-    required: true
-  release_type:
-    description: 'Release type: Pre-Release or Release'
-    required: false
-    default: 'Pre-Release'
-
 runs:
   using: "composite"
   steps:

@@ -16,6 +16,10 @@ on:
           # - Pre-Release
           # - Release
         default: CI
+      use_cache:
+        description: "Use ccache/bazel cache (restore/save)"
+        type: boolean
+        default: true
       allow_version_mismatch:
         description: "Force-load modules with mismatched symbol versions ( force check_version() to pass )"
         type: boolean
@@ -54,12 +58,13 @@ on:
         type: boolean
         default: false
       commit_mode:
-        description: "latest = branch tips, verified = audited pins"
+        description: "latest = branch tips, verified = audited pins, update = build latest then promote verified pins on success"
         required: false
         type: choice
         options:
           - latest
           - verified
+          - update
         default: verified
       root_flavor:
         description: "Root Flavor (If you select KowSU, you MUST DISABLE SUSFS since KowSU doesn't work with SUSFS)"
@@ -114,13 +119,6 @@ on:
         description: "Performance"
         type: boolean
         default: true
-      kernel_runner:
-        description: "Runner image for the build legs (ubuntu-24.04 = default, ubuntu-latest = newer image A/B)"
-        type: choice
-        options:
-          - ubuntu-24.04
-          - ubuntu-latest
-        default: ubuntu-24.04
       kernel_manifest_url:
         description: "Custom kernel manifest URL (default: googlesource). Use your fork URL for modified kernel source."
         type: string
@@ -139,7 +137,6 @@ jobs:
     outputs:
       nomount_commit: ${{ steps.resolve.outputs.nomount_commit }}
       kernelsu_commit: ${{ steps.resolve.outputs.kernelsu_commit }}
-      next_base_commit: ${{ steps.resolve.outputs.next_base_commit }}
       kernelsu_branch: ${{ steps.resolve.outputs.kernelsu_branch }}
       root_flavor: ${{ steps.resolve.outputs.root_flavor }}
       root_commit: ${{ steps.resolve.outputs.root_commit }}
@@ -176,8 +173,6 @@ jobs:
       feature_set: ${{ steps.features.outputs.feature_set }}
       manager_list: ${{ steps.manager.outputs.manager_list }}
     steps:
-      - uses: actions/checkout@v7
-
       - name: Validate page size selection
         shell: bash
         run: |
@@ -239,67 +234,64 @@ jobs:
             echo "$1=$2" >> "$GITHUB_OUTPUT"
           }
 
-          # Audited pins. Used only when commit_mode=verified.
-          # Refreshed 2026-11-02 to each upstream branch tip.
-          # NoMount is deliberately NOT pinned: it is a module-side component
-          # with no kernel contract, so it always tracks the dev tip even in
-          # verified mode (see the nomount_commit emit below).
-          # KernelSU: official main tip (28db74f6, 2026-11-01, "kernel: Fix
-          # SELinux generation tracking for policy updates (#3964)").
-          PIN_KERNELSU="28db74f6f4692e97006ce9ebd8b19b9cc614b5b7"
-          # BakaSU: official main tip (516d3e87, 2026-10-31, "ksuinit: make lint
-          # check happy"). Still tracks latest despite the fa12ffd fake_state
-          # removal - the 5 older branches (12-5.10/13-5.10/13-5.15/14-5.15/
-          # 14-6.1) fs patches reference `fake_state` and will fail to link with
-          # latest BakaSU; 6.6/6.12/6.18 are unaffected. Watch those 5 families.
-          PIN_BAKASU="516d3e87fbc986ccefdde2c2765f1700612441a9"
-          # SukiSU-Ultra: builtin tip (1cfa5734, 2026-10-31); defines fake_state
-          # itself and calls the susfs_def.h no_su API -> OK on tips. Note the
-          # repo's default branch (main, b8bd4b6c) is used only for SUSFS-off
-          # builds, which resolve it at run time rather than from this pin.
-          PIN_SUKISU_ULTRA="1cfa57340590971cba7521ed536da8ebbedc5f0a"
+          # Audited pins (from root-variants.yml). Used only when commit_mode=verified.
+          # NoMount: dev tip (2026-10-20, "kernel: use store_release for
+          # d_flags in nm_hijack_dentry_ops"; module-side only, no kernel contract).
+          PIN_NOMOUNT="e240bb031820fd3f7de5dadb007281b33bb70634"
+          # KernelSU: official main tip (46636100, 2026-10-20,
+          # "manager: remove DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION (#3927)").
+          # The susfs patch (10_enable_susfs_for_ksu) was verified to apply at
+          # the old 0c0fdb96 pin; this tip is several manager commits ahead of
+          # that layout - re-confirm the patch applies before relying on this
+          # pin for susfs/root builds. BBG is kernel-side and unaffected.
+          PIN_KERNELSU="4663610011d03771a64e7c36a2aa65bd1794022d"
+          # BakaSU: official main tip (2026-10-20,
+          # "manager: support multiple module repositories, one-shot scripts and
+          # other minimal fixes (#600)"). Advanced per user request to track
+          # latest despite the fa12ffd fake_state removal - the 5 older branches
+          # (12-5.10/13-5.10/13-5.15/14-5.15/14-6.1) fs patches reference
+          # `fake_state` and will fail to link with latest BakaSU; 6.6/6.12 are
+          # unaffected. Watch those 5 families for build failures.
+          PIN_BAKASU="dac2d186406a0d2b0ce3c67cad5a1fa1adbf9f4d"
+          # SukiSU-Ultra: builtin tip (2026-10-21,
+          # "kernel: switch sig_fallback hook from weak symbol to static_call");
+          # defines fake_state itself, calls the susfs_def.h no_su API -> OK on tips.
+          PIN_SUKISU_ULTRA="05f5cdf082d32bbc651c205ba4bdd1dc66cca7f5"
           # FinaSU: susfs-integrated fork of the tiann restructure; pin tracks
           # the susfs4ksu v2.3 ABI era its supercall dispatch is written against.
-          # master tip 2d5786b9 (2026-11-01, "susfs: Separate provider and
-          # operation state").
-          PIN_FINASU="2d5786b9129a254a87ac358c8bec0203ccd53351"
-          # SUSFS (gitlab simonpunk/susfs4ksu): every gki-<family> branch moved
-          # one commit, "KernelSU: Fix compiler error" (2026-10-30) - a compile
-          # fix for newer KernelSU headers, no new config symbol, no ABI change.
-          # The previous refresh (2026-10-27) added the priority uid filter
-          # ("susfs: Add priority uid filter" + its "Fix UAF bugs and worker not
-          # able to run" follow-up), guarded by CONFIG_KSU_SUSFS only;
-          # susfs_is_priority_uid_filtered() lives in fs/susfs.c, so the config
-          # list still needs no change.
+          # master tip 3f06a69d (2026-10-21, manager install-page animation;
+          # kernel ABI unchanged).
+          PIN_FINASU="3f06a69d40db4cbb5b86d239694c5adf911b2cce"
           declare -A PIN_SUSFS=(
-            [susfs_commit_android12_5_10]="b0e474642cf77ee797004a454fa441362723d0ba"
-            [susfs_commit_android13_5_10]="8a120081f2739bc0e4b1f6a389d8236f22944acc"
-            [susfs_commit_android13_5_15]="d5df1d937361530787fafa920dea3a9b6dc8ebef"
-            [susfs_commit_android14_5_15]="e22ceec7cbc459dcf560cf4a0ac34a8235c8df84"
-            [susfs_commit_android14_6_1]="a0ac906915c8a8d50d474dfb3cae478ef32edc1a"
-            [susfs_commit_android15_6_6]="c7f670f57b7d43d75066b6657f8aee9cdf580d96"
-            [susfs_commit_android16_6_12]="68f62fae75ada3959f816841a3c64299383521ed"
+            [susfs_commit_android12_5_10]="f43926dc94b8ffbf9b74321313536600f69367b1"
+            [susfs_commit_android13_5_10]="cbe3fe7b9fa599d316f68b08b06cde48218eaff5"
+            [susfs_commit_android13_5_15]="86b5b10068459dedb545dc5db46a0f0254428eda"
+            [susfs_commit_android14_5_15]="10b4f2156470338a5db2040f3d85992c285aa595"
+            [susfs_commit_android14_6_1]="b57ed1998b82c4e3a2a81cdbf11172a560979c40"
+            [susfs_commit_android15_6_6]="4a4cb1be85a4694372d3efb9420de69982eac29a"
+            [susfs_commit_android16_6_12]="9c9f19d8395693327c78df36569b44e94c187b8a"
           )
           # BakaSU keeps its own SUSFS pin set (kept separate so it can diverge
-          # again). Values = the same verified branch tips as PIN_SUSFS.
+          # again). Values = the same verified branch tips as PIN_SUSFS, now
+          # tracking latest alongside PIN_BAKASU.
           declare -A PIN_SUSFS_BAKASU=(
-            [susfs_commit_android12_5_10]="b0e474642cf77ee797004a454fa441362723d0ba"
-            [susfs_commit_android13_5_10]="8a120081f2739bc0e4b1f6a389d8236f22944acc"
-            [susfs_commit_android13_5_15]="d5df1d937361530787fafa920dea3a9b6dc8ebef"
-            [susfs_commit_android14_5_15]="e22ceec7cbc459dcf560cf4a0ac34a8235c8df84"
-            [susfs_commit_android14_6_1]="a0ac906915c8a8d50d474dfb3cae478ef32edc1a"
-            [susfs_commit_android15_6_6]="c7f670f57b7d43d75066b6657f8aee9cdf580d96"
-            [susfs_commit_android16_6_12]="68f62fae75ada3959f816841a3c64299383521ed"
+            [susfs_commit_android12_5_10]="f43926dc94b8ffbf9b74321313536600f69367b1"
+            [susfs_commit_android13_5_10]="cbe3fe7b9fa599d316f68b08b06cde48218eaff5"
+            [susfs_commit_android13_5_15]="86b5b10068459dedb545dc5db46a0f0254428eda"
+            [susfs_commit_android14_5_15]="10b4f2156470338a5db2040f3d85992c285aa595"
+            [susfs_commit_android14_6_1]="b57ed1998b82c4e3a2a81cdbf11172a560979c40"
+            [susfs_commit_android15_6_6]="4a4cb1be85a4694372d3efb9420de69982eac29a"
+            [susfs_commit_android16_6_12]="9c9f19d8395693327c78df36569b44e94c187b8a"
           )
           # SukiSU-Ultra keeps its own SUSFS pin set too (same starting values).
           declare -A PIN_SUSFS_SUKISU_ULTRA=(
-            [susfs_commit_android12_5_10]="b0e474642cf77ee797004a454fa441362723d0ba"
-            [susfs_commit_android13_5_10]="8a120081f2739bc0e4b1f6a389d8236f22944acc"
-            [susfs_commit_android13_5_15]="d5df1d937361530787fafa920dea3a9b6dc8ebef"
-            [susfs_commit_android14_5_15]="e22ceec7cbc459dcf560cf4a0ac34a8235c8df84"
-            [susfs_commit_android14_6_1]="a0ac906915c8a8d50d474dfb3cae478ef32edc1a"
-            [susfs_commit_android15_6_6]="c7f670f57b7d43d75066b6657f8aee9cdf580d96"
-            [susfs_commit_android16_6_12]="68f62fae75ada3959f816841a3c64299383521ed"
+            [susfs_commit_android12_5_10]="f43926dc94b8ffbf9b74321313536600f69367b1"
+            [susfs_commit_android13_5_10]="cbe3fe7b9fa599d316f68b08b06cde48218eaff5"
+            [susfs_commit_android13_5_15]="86b5b10068459dedb545dc5db46a0f0254428eda"
+            [susfs_commit_android14_5_15]="10b4f2156470338a5db2040f3d85992c285aa595"
+            [susfs_commit_android14_6_1]="b57ed1998b82c4e3a2a81cdbf11172a560979c40"
+            [susfs_commit_android15_6_6]="4a4cb1be85a4694372d3efb9420de69982eac29a"
+            [susfs_commit_android16_6_12]="9c9f19d8395693327c78df36569b44e94c187b8a"
           )
 
           pick() { # pinned repo ref  -> pinned when verified, else latest
@@ -312,8 +304,7 @@ jobs:
           }
 
           # NoMount (pinned in verified mode, else dev tip)
-          # NoMount always tracks the dev tip - never pinned, in either mode.
-          emit nomount_commit "$(resolve_sha https://github.com/maxsteeel/nomount.git refs/heads/dev)"
+          emit nomount_commit "$(pick "$PIN_NOMOUNT" https://github.com/maxsteeel/nomount.git refs/heads/dev)"
 
           # KernelSU-Next manager - always built from the official repo's dev branch.
           # pershoot's fork is used only for the kernel SUSFS integration (root_commit below),
@@ -366,40 +357,6 @@ jobs:
           else
             NEXT_COMMIT="$(resolve_sha https://github.com/KernelSU-Next/KernelSU-Next.git refs/heads/dev)"
           fi
-
-          # The kernel reports 30000 + count(merge-base(KSU HEAD, upstream dev))
-          # -- see .github/actions/root-setup. The manager has to be resolved at
-          # that same upstream commit, not at the fork tip: the fork tip is a
-          # fork-only SHA with no manager CI behind it, and pairing a manager
-          # from a different commit is what let a kernel reporting 33405 sit
-          # next to a manager reporting 33442.
-          if [ "$SCHED_SUSFS" = "true" ]; then
-            # Compare within the fork first: pershoot mirrors upstream dev, and
-            # the path needs no owner:branch colon. Across-repo compare is the
-            # fallback. curl with an explicit token on purpose -- `gh` is not
-            # authenticated inside this job, which silently yielded an empty
-            # base on run 41005208268 and left the pairing to the fallback.
-            NEXT_BASE=""
-            for cmp_url in \
-              "https://api.github.com/repos/pershoot/KernelSU-Next/compare/dev...dev-susfs" \
-              "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/compare/dev...pershoot:dev-susfs"; do
-              NEXT_BASE="$(curl -fsSL --max-time 30 --retry 3 \
-                -H "Authorization: Bearer ${{ github.token }}" \
-                -H "Accept: application/vnd.github+json" \
-                "$cmp_url" 2>/dev/null | jq -r '.merge_base_commit.sha // empty' 2>/dev/null || true)"
-              [[ "${NEXT_BASE:-}" =~ ^[0-9a-f]{40}$ ]] && break
-              NEXT_BASE=""
-            done
-            if [ -z "$NEXT_BASE" ]; then
-              echo "WARNING: could not resolve the pershoot dev-susfs merge base; manager tracks the fork tip" >&2
-              NEXT_BASE="$NEXT_COMMIT"
-            else
-              echo "[+] KernelSU-Next manager base ${NEXT_BASE:0:12} (merge-base with upstream dev)"
-            fi
-          else
-            NEXT_BASE="$NEXT_COMMIT"
-          fi
-          emit next_base_commit "$NEXT_BASE"
 
           mk_entry() { # flavor variant commit produce
             printf '{"root_flavor":"%s","variant":"%s","root_commit":"%s","produce":%s}' "$1" "$2" "$3" "$4"
@@ -497,16 +454,166 @@ jobs:
 
       - name: Resolve manager builds for selected root flavor(s)
         id: manager
-        # Shared implementation for both the build pipeline (main.yml) and the
-        # APK pipeline (managers.yml): .github/actions/resolve-managers.
-        uses: ./.github/actions/resolve-managers
-        with:
-          root_flavor: ${{ inputs.root_flavor }}
-          all_flavors: next,kernelsu,bakasu
-          allow_fallback: 'true'
-          root_matrix: ${{ steps.resolve.outputs.root_matrix }}
-          next_commit: ${{ steps.resolve.outputs.next_base_commit }}
-          finasu_commit: ${{ steps.resolve.outputs.finasu_commit }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Credit: authenticated gh-API manager lookup adapted from EmberHeart-Kernels
+          # commit ae9a341 (nullptr-t-oss/composite_actions fetch_ksu_manager).
+          # Each selected root must ship ALL manager APK builds. KernelSU-Next publishes
+          # its manager APKs (manager + manager-spoofed) from the official dev-tip
+          # build-manager-ci run; kernelsu (KernelSU), BakaSU, SukiSU-Ultra,
+          # and KowSU expose theirs as CI-run artifacts. All are pinned to an exact commit.
+          # No Root ships no manager.
+          resolve_one() { # flavor
+            local flavor="$1"
+            local owner repo wf stock
+            case "$flavor" in
+              next)
+                owner="KernelSU-Next"; repo="KernelSU-Next"; wf="build-manager-ci.yml"
+                # Manager is built from the official dev-tip commit (grabbed at run start).
+                stock="${{ steps.resolve.outputs.kernelsu_commit }}"
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for dev tip ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=dev&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for dev commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"manager,manager-spoofed"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+
+              kernelsu)
+                owner="tiann"; repo="KernelSU"; wf="build-manager.yml"
+                stock=$(git ls-remote https://github.com/tiann/KernelSU.git refs/heads/main | awk '{print $1; exit}')
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=main&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"manager"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+              bakasu)
+                owner="Baka-SU"; repo="BakaSU"; wf="build-manager.yml"
+                stock=$(git ls-remote https://github.com/Baka-SU/BakaSU.git refs/heads/main | awk '{print $1; exit}')
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=main&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"Manager-release,Spoofed-Manager-release"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+              sukisu-ultra)
+                owner="SukiSU-Ultra"; repo="SukiSU-Ultra"; wf="build-manager.yml"
+                stock=$(git ls-remote https://github.com/SukiSU-Ultra/SukiSU-Ultra.git refs/heads/main | awk '{print $1; exit}')
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=main&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"Manager,Spoofed-Manager"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+              finasu)
+                owner="LyraVoid"; repo="FinaSU"; wf="build-manager.yml"
+                stock="${{ steps.resolve.outputs.finasu_commit }}"
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=master&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"manager"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+
+              kowsu)
+                owner="KOWX712"; repo="KernelSU"; wf="build-manager.yml"
+                stock=$(git ls-remote https://github.com/KOWX712/KernelSU.git refs/heads/master | awk '{print $1; exit}')
+                run_id=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?head_sha=${stock}&status=success" \
+                  --jq '.workflow_runs[0].id // empty')
+                if [[ -z "${run_id}" ]]; then
+                  echo "No manager build for stock ${stock}, falling back to latest successful run" >&2
+                  fb=$(gh api "repos/${owner}/${repo}/actions/workflows/${wf}/runs?branch=master&status=success&per_page=1")
+                  run_id=$(echo "$fb" | jq -r '.workflow_runs[0].id // empty')
+                  stock=$(echo "$fb" | jq -r '.workflow_runs[0].head_sha // empty')
+                  if [[ -n "$run_id" ]]; then echo "Fallback to ${stock} run ${run_id}" >&2; fi
+                  if [[ -z "${run_id}" ]]; then
+                    echo "ERROR: no ${repo} manager build exists for stock commit ${stock}" >&2
+                    exit 1
+                  fi
+                fi
+                printf '{"flavor":"%s","owner":"%s","repo":"%s","source":"run","run_id":%s,"stock":"%s","want":"manager"}' \
+                  "$flavor" "$owner" "$repo" "$run_id" "$stock"
+                ;;
+              *)
+                echo "skipping unknown flavor: $flavor" >&2
+                return 0
+                ;;
+            esac
+          }
+
+          FLAVORS="${{ inputs.root_flavor || 'All' }}"
+          echo "Root flavor: ${FLAVORS}"
+          LIST=""
+          case "${FLAVORS}" in
+            All*) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one next)"$'\n'"$(resolve_one kernelsu)"$'\n'"$(resolve_one bakasu)") ;;
+            KernelSU-Next) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one next)") ;;
+            KernelSU) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one kernelsu)") ;;
+            BakaSU) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one bakasu)") ;;
+            SukiSU-Ultra) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one sukisu-ultra)") ;;
+            KowSU) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one kowsu)") ;;
+            FinaSU) LIST=$(jq -c -n '[inputs]' <<< "$(resolve_one finasu)") ;;
+            *) echo "Skipping manager resolution (no root flavor / none)." ;;
+          esac
+          if [ -n "$LIST" ]; then
+            echo "manager_list=$LIST" >> "$GITHUB_OUTPUT"
+            echo "Manager sources resolved."
+          else
+            echo "manager_list=[]" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Compose requested feature set
         id: features
@@ -577,9 +684,122 @@ jobs:
 
       - name: Download and scan all manager APKs
         id: scan
-        uses: ./.github/actions/list-manager-apks
-        with:
-          manager_list: ${{ needs.resolve-sources.outputs.manager_list }}
+        shell: bash
+        env:
+          MANAGER_LIST: ${{ needs.resolve-sources.outputs.manager_list }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MANAGER_LIST=${MANAGER_LIST#\[,/[}
+          if ! echo "$MANAGER_LIST" | jq empty 2>/dev/null; then
+            echo "ERROR: Invalid MANAGER_LIST JSON"
+            echo "Raw: $MANAGER_LIST"
+            exit 0
+          fi
+          OUT_APKS="${GITHUB_WORKSPACE:-$PWD}/manager_apks"
+          MANIFEST="${GITHUB_WORKSPACE:-$PWD}/manifest.txt"
+          rm -rf "$OUT_APKS" "$MANIFEST"
+          mkdir -p "$OUT_APKS"
+          : > "$MANIFEST"
+          echo "$MANAGER_LIST" | jq -c '.[]' | while read -r M; do
+            OWNER=$(echo "$M" | jq -r .owner)
+            REPO=$(echo "$M" | jq -r .repo)
+            SRC=$(echo "$M" | jq -r .source)
+            RUN_ID=$(echo "$M" | jq -r .run_id)
+            WANT=$(echo "$M" | jq -r '.want // ""')
+            DLDIR="dl_${REPO}"
+            mkdir -p "$DLDIR"
+            (
+              cd "$DLDIR"
+              if [ "$SRC" = "release" ]; then
+                curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest" > rel.json
+                for URL in $(jq -r '.assets[] | select(.name | endswith(".apk")) | .browser_download_url' rel.json); do
+                  NAME="${URL##*/}"
+                  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$NAME" "$URL"
+                  cp -f "$NAME" "$OUT_APKS/$NAME"
+                  echo "$OWNER|$REPO|$NAME" >> "$MANIFEST"
+                done
+              else
+                AJSON=$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  "https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${RUN_ID}/artifacts")
+                if [ -z "$WANT" ]; then
+                  ART_IDS=$(echo "$AJSON" | jq -r '.artifacts[] | "\(.id) \(.name)"')
+                else
+                  ART_IDS=$(echo "$AJSON" | jq -r --arg want "$WANT" '
+                    ($want | split(",")) as $wl |
+                    .artifacts[] | select(.name as $n | any($wl[]; $n == .)) | "\(.id) \(.name)"')
+                fi
+                echo "$ART_IDS" | while read -r AID ART_NAME; do
+                  [ -n "$AID" ] || continue
+                  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                    -H "Authorization: Bearer ${GH_TOKEN}" \
+                    -o "_${AID}.zip" \
+                    "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${AID}/zip"
+                  mkdir -p "_${AID}"
+                  unzip -o -q "_${AID}.zip" -d "_${AID}" || true
+                  rm -f "_${AID}.zip"
+                  for apk in "_${AID}"/*.apk; do
+                    [ -f "$apk" ] || continue
+                    NAME="$(basename "$apk")"
+                    # Spoofed-manager artifacts (BakaSU/SukiSU upstream CI)
+                    # package APKs under the SAME filename as the stock
+                    # build. A flat cp -f then silently overwrites stock
+                    # with spoofed (or vice versa) - run 38659164844 lost
+                    # the BakaSU spoofed manager this way and the digest
+                    # had no spoofed download. Disambiguate: when the
+                    # upstream artifact is a spoofed one but the APK name
+                    # does not say so, suffix the filename. The digest's
+                    # FLAVOR_MANAGERS already expects *-spoofed.apk.
+                    case "$ART_NAME" in
+                      *poofed*)
+                        case "$NAME" in
+                          *poofed*) ;;
+                          *) NAME="${NAME%.apk}-spoofed.apk" ;;
+                        esac
+                        ;;
+                    esac
+                    cp -f "$apk" "$OUT_APKS/$NAME"
+                    echo "$OWNER|$REPO|$NAME" >> "$MANIFEST"
+                  done
+                  rm -rf "_${AID}"
+                done
+              fi
+            )
+          done
+          # Filter BakaSU to release arm64/universal APKs only (drop debug,
+          # 32-bit, riscv64). Upstream re-packaged 2026-10-14: artifacts now
+          # carry per-ABI APKs (arm64-v8a/armeabi-v7a/riscv64) instead of a
+          # single universal APK - keep arm64-v8a (all our devices) plus the
+          # legacy universal name.
+          if grep -q "Baka-SU|BakaSU|" "$MANIFEST" 2>/dev/null; then
+            tmp_manifest="${MANIFEST}.filtered"
+            : > "$tmp_manifest"
+            while IFS='|' read -r o r n; do
+              [ -n "$n" ] || continue
+              if [ "$o" = "Baka-SU" ] && [ "$r" = "BakaSU" ]; then
+                ln=$(echo "$n" | tr '[:upper:]' '[:lower:]')
+                # keep universal (old packaging) or arm64-v8a (new), drop debug
+                if [[ "$ln" != *universal* && "$ln" != *arm64-v8a* ]]; then echo "Dropping BakaSU non-arm64 $n" >&2; rm -f "$OUT_APKS/$n"; continue; fi
+                if [[ "$ln" == *debug* ]]; then echo "Dropping BakaSU debug $n" >&2; rm -f "$OUT_APKS/$n"; continue; fi
+                # now only arm64/universal release + spoofed remain
+              fi
+              echo "$o|$r|$n" >> "$tmp_manifest"
+            done < "$MANIFEST"
+            mv "$tmp_manifest" "$MANIFEST"
+          fi
+          # Build the flat apk list from the manifest (single source of truth)
+          APK_JSON="[]"
+          while IFS='|' read -r o r n; do
+            [ -n "$n" ] || continue
+            APK_JSON=$(echo "$APK_JSON" | jq -c --arg o "$o" --arg r "$r" --arg n "$n" \
+              '. + [{owner:$o,repo:$r,apk:$n}]')
+          done < "$MANIFEST"
+          echo "apk_list=${APK_JSON}" >> "$GITHUB_OUTPUT"
+          echo "Found $(wc -l < "$MANIFEST") manager APKs"
+          find "$OUT_APKS" -maxdepth 1 -type f -printf "%f\n"
 
       - name: Upload all manager APKs as one cross-blob
         uses: actions/upload-artifact@v7
@@ -685,6 +905,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -716,6 +937,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -747,6 +969,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -778,6 +1001,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -809,6 +1033,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -840,6 +1065,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -871,41 +1097,7 @@ jobs:
       keep_kmi: ${{ inputs.keep_kmi || false }}
       os_patch_level: ${{ inputs.os_patch_level || 'All' }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
-      page_size: ${{ inputs.page_size || '4k' }}
-    secrets: inherit
-
-  build-android17-6-18:
-    needs:
-      - resolve-sources
-      - build-nomount-module
-    if: "(github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && !inputs.test_release_notes && ((github.event_name == 'schedule' && inputs.kernel_build_version == '') || inputs.kernel_build_version == 'All' || inputs.kernel_build_version == '6.18.x-android17')"
-    strategy:
-      fail-fast: false
-      matrix:
-        root: ${{ fromJson(needs.resolve-sources.outputs.root_matrix) }}
-    uses: ./.github/workflows/prepare.yml
-    with:
-      config_file: .github/config/android17-6.18.json
-      feature_set: ${{ needs.resolve-sources.outputs.feature_set }}
-      # simonpunk/susfs4ksu has no gki-android17-6.18 branch (19 branches, newest
-      # is gki-android16-6.12), so no SUSFS pin is emitted for this family. A
-      # SUSFS-enabled 6.18 dispatch therefore fails loudly in the SUSFS resolve
-      # step rather than quietly building without the patches. KernelSU-Next
-      # only for now: the 6.18 config is still marked a placeholder family.
-      susfs_commit: ''
-      nomount_commit: ${{ needs.resolve-sources.outputs.nomount_commit }}
-      kernel_patches_commit: ${{ needs.resolve-sources.outputs.kernel_patches_commit }}
-      root_flavor: ${{ matrix.root.root_flavor }}
-      produce_stock_configs: ${{ matrix.root.produce }}
-      root_commit: ${{ matrix.root.root_commit }}
-      variant: ${{ matrix.root.variant }}
-      ksu_branch: ${{ needs.resolve-sources.outputs.kernelsu_commit }}
-      anykernel3_commit: ${{ needs.resolve-sources.outputs.anykernel3_commit }}
-      droidspaces_commit: ${{ needs.resolve-sources.outputs.droidspaces_commit }}
-      brand_name: ${{ inputs.brand_name || 'Nekkochan' }}
-      keep_kmi: ${{ inputs.keep_kmi || false }}
-      os_patch_level: ${{ inputs.os_patch_level || 'All' }}
-      allow_version_mismatch: ${{ inputs.allow_version_mismatch || false }}
+      use_cache: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
       page_size: ${{ inputs.page_size || '4k' }}
       manifest_url: ${{ inputs.kernel_manifest_url || '' }}
     secrets: inherit
@@ -1252,7 +1444,7 @@ jobs:
 
   update-verified-pins:
     if: "github.event_name == 'workflow_dispatch' && !inputs.test_release_notes && inputs.commit_mode == 'update'"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: write
@@ -1319,7 +1511,6 @@ jobs:
       - build-android14-6-1
       - build-android15-6-6
       - build-android16-6-12
-      - build-android17-6-18
 
     steps:
       - name: Download Misc Artifacts
@@ -1417,7 +1608,6 @@ jobs:
       - build-android14-6-1
       - build-android15-6-6
       - build-android16-6-12
-      - build-android17-6-18
       - build-nomount-module
       - publish-manager-artifacts
       - notes-preview
@@ -1454,7 +1644,6 @@ jobs:
           check_selected "6.1.x-android14" "build-android14-6-1" "${{ needs.build-android14-6-1.result }}"
           check_selected "6.6.x-android15" "build-android15-6-6" "${{ needs.build-android15-6-6.result }}"
           check_selected "6.12.x-android16" "build-android16-6-12" "${{ needs.build-android16-6-12.result }}"
-          check_selected "6.18.x-android17" "build-android17-6-18" "${{ needs.build-android17-6-18.result }}"
 
           if [[ "$failed" -ne 0 ]]; then
             exit 1
@@ -1723,15 +1912,8 @@ jobs:
             [ -z "$name" ] && continue
             if [ ! -d "release-assets/${name}" ]; then
               echo "Re-fetching missed artifact: $name"
-              # The artifacts endpoint returns {"total_count":N,"artifacts":[...]},
-              # NOT a bare array: '.[0]' threw "expected an array but got: object"
-              # on every call, which is what made run 40835740313 record 139
-              # re-fetch failures and abort the release with 482 of 621 downloaded.
-              # Download through gh (not bare curl): the archive URL needs auth.
-              artifact_id=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=${name}" \
-                --jq '.artifacts[0].id // empty' || true)
-              if [ -z "$artifact_id" ] \
-                || ! gh api "repos/${{ github.repository }}/actions/artifacts/${artifact_id}/zip" > "release-assets/${name}.zip" 2>/dev/null; then
+              if ! gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=${name}" \
+                --jq '.[0].archive_download_url' | xargs -r curl -fsSL -o "release-assets/${name}.zip"; then
                 echo "ERROR: failed to re-fetch $name" >&2
                 missing=$((missing + 1))
               else
@@ -1856,20 +2038,19 @@ jobs:
 
   notes-preview:
     if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.ENABLE_SCHEDULED_BUILDS == 'true'))
-    needs: [resolve-sources, build-android12-5-10, build-android13-5-10, build-android13-5-15, build-android14-5-15, build-android14-6-1, build-android15-6-6, build-android16-6-12, build-android17-6-18]
+    needs: [resolve-sources, build-android12-5-10, build-android13-5-10, build-android13-5-15, build-android14-5-15, build-android14-6-1, build-android15-6-6, build-android16-6-12]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: Render release notes preview (always)
-        # Renderer lives in .github/scripts (extracted out of this workflow).
-        uses: ./.github/actions/release-notes-preview
-        with:
-          mode: kernel
         env:
           ROOT_FLAVOR: ${{ inputs.root_flavor }}
           FEATURE_SET: ${{ needs.resolve-sources.outputs.feature_set }}
           MANAGER_LIST: ${{ needs.resolve-sources.outputs.manager_list }}
           ROOT_MATRIX: ${{ needs.resolve-sources.outputs.root_matrix }}
+          # Scheduled (nightly) runs carry no inputs; fall back to the same
+          # all-features-on defaults the resolve-sources feature computation
+          # uses, so the rendered notes list the features actually built.
           IS_SCHEDULE: ${{ github.event_name == 'schedule' }}
           USE_SUSFS: ${{ inputs.use_susfs || (github.event_name == 'schedule' && true) || false }}
           USE_NOMOUNT: ${{ inputs.use_nomount || (github.event_name == 'schedule' && true) || false }}
@@ -1881,6 +2062,7 @@ jobs:
           USE_UNICODE: ${{ inputs.use_unicode || (github.event_name == 'schedule' && true) || false }}
           USE_BPF: ${{ inputs.use_bpf || (github.event_name == 'schedule' && true) || false }}
           USE_PERF: ${{ inputs.use_perf || false }}
+          USE_CACHE: ${{ inputs.use_cache || (github.event_name == 'schedule' && true) || false }}
           PAGE_SIZE: ${{ inputs.page_size || '4k' }}
           KERNEL_BUILD_VERSION: ${{ inputs.kernel_build_version || 'All' }}
           NOMOUNT_COMMIT: ${{ needs.resolve-sources.outputs.nomount_commit }}
@@ -1914,6 +2096,118 @@ jobs:
           SUSFS_ANDROID14_6_1_SUKISU_ULTRA: ${{ needs.resolve-sources.outputs.susfs_commit_android14_6_1_sukisu_ultra }}
           SUSFS_ANDROID15_6_6_SUKISU_ULTRA: ${{ needs.resolve-sources.outputs.susfs_commit_android15_6_6_sukisu_ultra }}
           SUSFS_ANDROID16_6_12_SUKISU_ULTRA: ${{ needs.resolve-sources.outputs.susfs_commit_android16_6_12_sukisu_ultra }}
+          # KSU version not computed here; render will show placeholder if release job skipped
+        run: |
+          set -e
+            python3 - <<'PYEOF' > release_body.md
+          import json, os
+          def env(n,d=""): return os.environ.get(n,d).strip() or d
+          def parse_managers(raw):
+              try: return json.loads(raw) if raw.strip() else []
+              except: return []
+          root = env("ROOT_FLAVOR","All")
+          if root.startswith("All"): root = "All"
+          feats=[]
+          if env("USE_SUSFS","true")=="true": feats.append("SUSFS")
+          if env("USE_NOMOUNT","true")=="true": feats.append("NoMount")
+          if env("USE_BBG","true")=="true": feats.append("Baseband Guard")
+          if env("USE_DS","true")=="true": feats.append("DroidSpaces-OSS")
+          if env("USE_NET","true")=="true": feats.append("Networking")
+          if env("USE_NTSYNC","true")=="true": feats.append("NTSync")
+          if env("USE_PTRACE","true")=="true": feats.append("Ptrace Leak Fix")
+          if env("USE_UNICODE","true")=="true": feats.append("Unicode Fix")
+          if env("USE_BPF","true")=="true": feats.append("BTF / eBPF / FUSE-BPF")
+          if env("USE_PERF","false")=="true": feats.append("Performance Tuning")
+          if env("PAGE_SIZE","4k")=="16k": feats.append("16 KB page size (ARM64)")
+          lines=[]
+          lines.append("# Nekko Kernel for GKI2 Devices")
+          lines.append("")
+          lines.append("## Root")
+          lines.append("")
+          ksun_branch=env("KSUN_BRANCH","dev-susfs")
+          ksun_commit=env("KSUN_COMMIT","")
+          ksu_commit=env("KSU_COMMIT","")
+          bakasu_commit=env("BAKASU_COMMIT","")
+          sukisu_ultra_commit=env("SUKISU_ULTRA_COMMIT","")
+          finasu_commit=env("FINASU_COMMIT","")
+          kowsu_commit=env("KOWSU_COMMIT","")
+          kernelsu_commit=env("KERNELSU_COMMIT","")
+          nm=env("NOMOUNT_COMMIT","")
+          kp=env("KERNEL_PATCHES_COMMIT","")
+          ak=env("ANYKERNEL3_COMMIT","")
+          ds=env("DROIDSPACES_COMMIT","")
+          _rmatrix={}
+          try: _rmatrix={m.get("root_flavor",""):m.get("root_commit","") for m in json.loads(env("ROOT_MATRIX","[]")) if isinstance(m,dict)}
+          except: pass
+          if env("USE_SUSFS","true")=="true":
+              _next_url="https://github.com/pershoot/KernelSU-Next/commit/"
+          else:
+              _next_url="https://github.com/KernelSU-Next/KernelSU-Next/commit/"
+          _root_urls={"next":_next_url,"kernelsu":"https://github.com/tiann/KernelSU/commit/","bakasu":"https://github.com/Baka-SU/BakaSU/commit/","sukisu-ultra":"https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/","finasu":"https://github.com/LyraVoid/FinaSU/commit/","kowsu":"https://github.com/KOWX712/KernelSU/commit/"}
+          _root_commits={"next":_rmatrix.get("next","") or kernelsu_commit,"kernelsu":_rmatrix.get("kernelsu","") or ksu_commit,"bakasu":_rmatrix.get("bakasu","") or bakasu_commit,"sukisu-ultra":_rmatrix.get("sukisu-ultra","") or sukisu_ultra_commit,"finasu":_rmatrix.get("finasu","") or finasu_commit,"kowsu":_rmatrix.get("kowsu","") or kowsu_commit}
+          _flavors0=[m.get("flavor","") for m in parse_managers(env("MANAGER_LIST","")) if m.get("flavor","")]
+          if not _flavors0:
+              _flavors0={"KernelSU-Next":["next"],"KernelSU":["kernelsu"],"BakaSU":["bakasu"],"SukiSU-Ultra":["sukisu-ultra"],"FinaSU":["finasu"],"KowSU":["kowsu"],"No Root":[],"All":["next","kernelsu","bakasu"]}.get(root,["next","kernelsu","bakasu"])
+          _labels0={"next":"KernelSU-Next","kernelsu":"KernelSU","bakasu":"BakaSU","sukisu-ultra":"SukiSU-Ultra","finasu":"FinaSU","kowsu":"KowSU"}
+          _rc=[]
+          for _fl0 in _flavors0:
+              _c=_root_commits.get(_fl0,"")
+              if _c and len(_c)==40: _rc.append(f"{_labels0.get(_fl0,_fl0)} [`{_c[:7]}`]({_root_urls[_fl0]}{_c})")
+              elif _c: _rc.append(f"{_labels0.get(_fl0,_fl0)} `{_c}`")
+          for _r in _rc: lines.append(f"- {_r}")
+          lines.append("")
+          lines.append("## Features")
+          lines.append("")
+          _kp_url="https://github.com/Duy-Thanh/kernel_patches/commit/"
+          _feat_commit={"NoMount":("https://github.com/maxsteeel/nomount/commit/",nm),"Baseband Guard":(_kp_url,kp),"DroidSpaces-OSS":("https://github.com/ravindu644/Droidspaces-OSS/commit/",ds)}
+          for f in feats:
+              _u,_c=_feat_commit.get(f,("",""))
+              if _c and len(_c)==40: lines.append(f"- {f} [`{_c[:7]}`]({_u}{_c})")
+              elif _c: lines.append(f"- {f} `{_c}`")
+              else: lines.append(f"- {f}")
+          if not feats: lines.append("- (none)")
+          kp=env("KERNEL_PATCHES_COMMIT","")
+          ak=env("ANYKERNEL3_COMMIT","")
+          ds=env("DROIDSPACES_COMMIT","")
+          lines.append("")
+          lines.append("## SUSFS commits")
+          lines.append("")
+          all_variants=["android12-5.10","android13-5.10","android13-5.15","android14-5.15","android14-6.1","android15-6.6","android16-6.12"]
+          def kbv_to_variant(kbv):
+              if ".x-android" in kbv:
+                  kv, av = kbv.split(".x-android", 1)
+                  v = f"android{av}-{kv}"
+                  return v if v in all_variants else ""
+              return ""
+          kbv=env("KERNEL_BUILD_VERSION","All")
+          _sel=kbv_to_variant(kbv)
+          variants=[_sel] if _sel else list(all_variants)
+          sus_map={"android12-5.10":env("SUSFS_ANDROID12_5_10",""),"android13-5.10":env("SUSFS_ANDROID13_5_10",""),"android13-5.15":env("SUSFS_ANDROID13_5_15",""),"android14-5.15":env("SUSFS_ANDROID14_5_15",""),"android14-6.1":env("SUSFS_ANDROID14_6_1",""),"android15-6.6":env("SUSFS_ANDROID15_6_6",""),"android16-6.12":env("SUSFS_ANDROID16_6_12","")}
+          sus_map_bakasu={"android12-5.10":env("SUSFS_ANDROID12_5_10_BAKASU",""),"android13-5.10":env("SUSFS_ANDROID13_5_10_BAKASU",""),"android13-5.15":env("SUSFS_ANDROID13_5_15_BAKASU",""),"android14-5.15":env("SUSFS_ANDROID14_5_15_BAKASU",""),"android14-6.1":env("SUSFS_ANDROID14_6_1_BAKASU",""),"android15-6.6":env("SUSFS_ANDROID15_6_6_BAKASU",""),"android16-6.12":env("SUSFS_ANDROID16_6_12_BAKASU","")}
+          sus_map_sukisu_ultra={"android12-5.10":env("SUSFS_ANDROID12_5_10_SUKISU_ULTRA",""),"android13-5.10":env("SUSFS_ANDROID13_5_10_SUKISU_ULTRA",""),"android13-5.15":env("SUSFS_ANDROID13_5_15_SUKISU_ULTRA",""),"android14-5.15":env("SUSFS_ANDROID14_5_15_SUKISU_ULTRA",""),"android14-6.1":env("SUSFS_ANDROID14_6_1_SUKISU_ULTRA",""),"android15-6.6":env("SUSFS_ANDROID15_6_6_SUKISU_ULTRA",""),"android16-6.12":env("SUSFS_ANDROID16_6_12_SUKISU_ULTRA","")}
+          _flavors=[m.get("flavor","") for m in parse_managers(env("MANAGER_LIST","")) if m.get("flavor","")]
+          if not _flavors:
+              _flavors={"KernelSU-Next":["next"],"KernelSU":["kernelsu"],"BakaSU":["bakasu"],"SukiSU-Ultra":["sukisu-ultra"],"KowSU":["kowsu"],"No Root":[],"All":["next","kernelsu","bakasu"]}.get(root,["next","kernelsu","bakasu"])
+          _labels={"next":"KernelSU-Next","kernelsu":"KernelSU","bakasu":"BakaSU","sukisu-ultra":"SukiSU-Ultra","kowsu":"KowSU"}
+          _susfs_url="https://gitlab.com/simonpunk/susfs4ksu"
+          lines.append("| SUSFS branch |" + "".join(f" {_labels.get(_fl,_fl)} |" for _fl in _flavors))
+          lines.append("|---" * (len(_flavors) + 1) + "|")
+          for v in variants:
+              _row=f"| gki-{v} |"
+              for _fl in _flavors:
+                  # KowSU never ships SUSFS: render n/a rather than shared pins.
+                  _sm={} if _fl=="kowsu" else (sus_map_sukisu_ultra if _fl=="sukisu-ultra" else (sus_map_bakasu if _fl=="bakasu" else sus_map))
+                  sha=_sm.get(v,"")
+                  sha_s=f"[`{sha[:7]}`]({_susfs_url}/-/commit/{sha})" if sha else "_n/a_"
+                  _row+=f" {sha_s} |"
+              lines.append(_row)
+          lines.append("")
+          lines.append("")
+          output="\n".join(lines)+"\n"
+          print(output,end="")
+          s=os.environ.get("GITHUB_STEP_SUMMARY")
+          if s: open(s,"a").write(output)
+          PYEOF
       - name: Upload release notes preview artifact
         uses: actions/upload-artifact@v7
         with:

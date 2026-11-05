@@ -1,10 +1,6 @@
 name: 'Setup SUSFS'
-description: 'Resolve, apply and fix SUSFS in one step: commit resolution, per-flavor enable, patches, then the post-patch build fixes (ksu_close_fd, selinux_hide)'
+description: 'Clone and apply SUSFS patches with version-specific fixes'
 inputs:
-  enabled:
-    description: 'Whether SUSFS is part of this build ("true"/"false"). When false the patch steps are skipped but the generic post-patch fixes still run.'
-    required: false
-    default: "true"
   susfs_commit:
     description: 'SUSFS commit hash (empty = latest on auto-derived gki-{version} branch)'
     required: false
@@ -28,49 +24,14 @@ inputs:
     description: 'Selected root implementation (kernelsu / next / bakasu / sukisu-ultra). KernelSU (tiann main) needs the 10_enable_susfs_for_ksu patch; other flavors already ship SUSFS.'
     required: false
     default: ""
-outputs:
-  susfs_commit:
-    description: 'Resolved SUSFS commit actually used (latest tip for the next flavor, the pin otherwise)'
-    value: ${{ steps.resolve.outputs.commit }}
 
 runs:
   using: "composite"
   steps:
-    - name: Resolve SUSFS commit
-      id: resolve
-      if: inputs.enabled == 'true'
-      shell: bash
-      run: |
-        set -euo pipefail
-        # android17-6.18 has no upstream susfs4ksu branch (newest is
-        # gki-android16-6.12), so it runs a port of the 6.12 patch maintained in
-        # .github/actions/susfs/susfs618 - a materialised susfs4ksu tree that
-        # susfs-setup builds locally. Skipping the remote resolve here keeps a
-        # 6.18 dispatch from failing on an empty ref.
-        if [ "${{ inputs.version }}" = "android17-6.18" ]; then
-          echo "android17-6.18: no upstream SUSFS branch, using the local 6.12->6.18 port"
-          echo "commit=local-618" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        # KernelSU-Next (next) always uses the latest susfs4ksu gki branch tip so
-        # SUSFS stays API-matched to the always-latest KernelSU-Next tree. All
-        # other roots (kernelsu, bakasu, finasu, sukisu-ultra) use the pinned
-        # verified SUSFS commit.
-        if [ "${{ inputs.root_flavor }}" = "next" ]; then
-          BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
-          SUSFS_COMMIT="$(git ls-remote https://gitlab.com/simonpunk/susfs4ksu.git "refs/heads/${BRANCH}" | cut -f1)"
-          echo "KernelSU-Next: resolving SUSFS at latest on ${BRANCH} -> ${SUSFS_COMMIT}"
-        else
-          SUSFS_COMMIT="${{ inputs.susfs_commit }}"
-          echo "Using pinned SUSFS commit: ${SUSFS_COMMIT}"
-        fi
-        echo "commit=${SUSFS_COMMIT}" >> "$GITHUB_OUTPUT"
-
     - name: Setup SUSFS Branch
-      if: inputs.enabled == 'true'
       uses: ./.github/actions/susfs-setup
       with:
-        susfs_commit: ${{ steps.resolve.outputs.commit }}
+        susfs_commit: ${{ inputs.susfs_commit }}
         version: ${{ inputs.version }}
         root_flavor: ${{ inputs.root_flavor }}
 
@@ -79,7 +40,7 @@ runs:
       # apply the enable patch from susfs4ksu onto the KernelSU checkout.
       # pershoot dev-susfs (next) and BakaSU already include SUSFS, so this is
       # a no-op for those flavors.
-      if: inputs.enabled == 'true' && inputs.root_flavor == 'kernelsu'
+      if: inputs.root_flavor == 'kernelsu'
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/KernelSU
       run: |
@@ -92,17 +53,14 @@ runs:
         echo "Applying SUSFS enable patch to KernelSU (tiann) checkout (kernel/KernelSU/kernel)"
         patch -p1 < "$PATCH"
 
-    - name: Pin FinaSU manager as the only trusted manager
-      # FinaSU carries its own SUSFS kernel-side glue since 5b83330b
-      # (2026-10-23, "kernel: Add SUSFS kernel patch compatibility"):
-      # kernel/extension/susfs.c exports every ksu_handle_* / my_write_* symbol
-      # the 50_add patch externs, kernel/core/init.c calls susfs_init() under
-      # CONFIG_KSU_SUSFS, and kernel/Kconfig declares config KSU_SUSFS. So the
-      # KSU-side 10_enable patch — and the 400-line drift-repair script that
-      # existed to keep it half-applying — are gone.
-      # What is still ours: the manager cert, injected as the second trusted
-      # signature - without it the manager shows "Not installed".
-      if: inputs.enabled == 'true' && inputs.root_flavor == 'finasu'
+    - name: Enable SUSFS for FinaSU (LyraVoid)
+      # FinaSU (plain tiann-layout fork) carries no susfs integration of its
+      # own; it gets the same 10_enable treatment as the kernelsu flavour plus
+      # the vendored LingLuo17 drift fixes (selinux_hide symbol exports for the
+      # susfs side's ThinLTO externs, fd-variant exec hooks, seccomp filter
+      # mode, Kbuild restore) and the manager cert injected into the second
+      # trust slot - without it the manager shows "Not installed".
+      if: inputs.root_flavor == 'finasu'
       shell: bash
       working-directory: ${{ github.workspace }}/kernel
       env:
@@ -110,6 +68,20 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
+        bash "$GITHUB_WORKSPACE/.github/actions/susfs/finasu_compat/apply.sh" FinaSU "${{ inputs.version }}" "${{ inputs.sublevel }}"
+
+        # Old-model completion: when the 10_enable selinux_hide rewrite partially
+        # applies, the file can end up without fake_state entirely, while the
+        # susfs kernel patch's security/selinux/selinuxfs.c externs it (and
+        # expects it backed by the sepolicy backup, per the 10_enable old-model
+        # design). Define it globally and initialise it from backup_sepolicy in
+        # enable(), and globalise the fake_status trio for the patch's externs.
+        SEL="FinaSU/kernel/feature/selinux_hide.c"
+        if ! grep -q 'fake_state' "$SEL"; then
+          python3 "$GITHUB_WORKSPACE/.github/actions/susfs/finasu_compat/fix_old_model.py" "$SEL"
+          grep -n '^struct selinux_state fake_state;' "$SEL"
+        fi
+
         # Manager-cert injection: derive size/sha256 from the current FinaSU
         # release APK (matches the manager flavour our release ships) and
         # inject as the second trusted signature. Falls back loudly if the
@@ -131,129 +103,51 @@ runs:
         [ -n "$CERT_INFO" ] || { echo "ERROR: cert extraction failed" >&2; exit 1; }
         CERT_SIZE="$(echo "$CERT_INFO" | awk '{print $1}')"
         CERT_HASH="$(echo "$CERT_INFO" | awk '{print $2}')"
-        echo "Pinning FinaSU as the only trusted manager: size=$CERT_SIZE sha256=$CERT_HASH"
-        # One manager, nobody else: replace the slot-1 defaults FinaSU inherited
-        # from tiann/KernelSU with the FinaSU key, never define the second slot,
-        # and zero the preset-manager mask so no other row (KernelSU/KowSU/MKSU/
-        # RKSU/xxKSU) is compiled. Correct in both modes: with dynamic managers
-        # (CONFIG_KSU_DYNAMIC_MANAGER=y, the upstream default) FINASU_TRUSTED_*
-        # falls back to slot 1, and the classic two-slot build gets one row.
-        # Fails loudly if any anchor moved instead of shipping a stale key.
-        SIZE="$CERT_SIZE" HASH="$CERT_HASH" python3 - FinaSU/kernel/Kbuild <<'PY'
-        import os, sys
+        echo "Injecting FinaSU manager cert into second trust slot: size=$CERT_SIZE sha256=$CERT_HASH"
+        awk -v size="$CERT_SIZE" -v hash="$CERT_HASH" '
+          !done && /^ccflags-y \+= -DEXPECTED_HASH=/ {
+            print
+            print "# injected by GKI_KernelSU_SUSFS finasu flavour: trust the official FinaSU manager via the second signature slot"
+            print "KSU_EXPECTED_SIZE2 := " size
+            print "KSU_EXPECTED_HASH2 := " hash
+            print "KSU_SECOND_SIGNATURE_RELEASE := 1"
+            done = 1
+            next
+          }
+          { print }
+        ' FinaSU/kernel/Kbuild > FinaSU/kernel/Kbuild.new && mv FinaSU/kernel/Kbuild.new FinaSU/kernel/Kbuild
+        grep -q "^KSU_EXPECTED_SIZE2 := " FinaSU/kernel/Kbuild \
+          && grep -q "^KSU_EXPECTED_HASH2 := " FinaSU/kernel/Kbuild \
+          && grep -q "^KSU_SECOND_SIGNATURE_RELEASE := 1" FinaSU/kernel/Kbuild \
+          || { echo "ERROR: Kbuild cert injection failed (anchor missing)" >&2; exit 1; }
 
-        path = sys.argv[1]
-        size, h = os.environ["SIZE"], os.environ["HASH"]
-        src = open(path, encoding="utf-8").read()
-
-
-        def sub1(old, new, what):
-            global src
-            n = src.count(old)
-            if n != 1:
-                sys.exit(f"ERROR: {what} anchor matched {n} time(s) in {path}")
-            src = src.replace(old, new, 1)
-
-
-        # slot 1 is the row FinaSU inherited from tiann/KernelSU - make it FinaSU's key
-        sub1("KSU_EXPECTED_SIZE := 0x033b", f"KSU_EXPECTED_SIZE := {size}", "KSU_EXPECTED_SIZE default")
-        sub1("KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6",
-             f"KSU_EXPECTED_HASH := {h}", "KSU_EXPECTED_HASH default")
-        # compile only the FinaSU row of the preset-manager table
-        sub1("KSU_PRESET_MANAGER_MASK := 0xff", "KSU_PRESET_MANAGER_MASK := 0x00", "preset manager mask")
-
-        open(path, "w", encoding="utf-8").write(src)
-
-        for cond, msg in [
-            (f"KSU_EXPECTED_SIZE := {size}" in src, "size not applied"),
-            (f"KSU_EXPECTED_HASH := {h}" in src, "hash not applied"),
-            ("KSU_PRESET_MANAGER_MASK := 0x00" in src, "preset mask not applied"),
-            ("0x033b" not in src, "stock KernelSU size still present"),
-            ("c371061b" not in src, "stock KernelSU hash still present"),
-            ("KSU_EXPECTED_SIZE2 :=" not in src, "a second slot was added"),
-        ]:
-            if not cond:
-                sys.exit(f"ERROR: {msg}")
-
-        print(f"Kbuild: FinaSU is the only manager slot (size {size}, preset mask 0x00)")
-
-        PY
+    - name: Enable SUSFS for BakaSU
+      # BakaSU carries SUSFS but ships my_write_context/my_write_access as
+      # static and lacks my_setprocattr + preinit functions that the susfs4ksu
+      # 50_add_susfs_in_gki patch extern-declares. This compat layer makes the
+      # symbols global and adds preinit support so the link succeeds.
+      if: inputs.root_flavor == 'bakasu'
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel
+      env:
+        SUSFS4KSU: ${{ github.workspace }}/susfs4ksu
+      run: |
+        set -euo pipefail
+        bash "$GITHUB_WORKSPACE/.github/actions/susfs/bakasu_compat/apply.sh" BakaSU "${{ inputs.version }}" "${{ inputs.sublevel }}"
 
     - name: Enable SUSFS Kernel Configs
-      if: inputs.enabled == 'true'
       uses: ./.github/actions/susfs-config
 
     - name: Apply SUSFS Patches
-      if: inputs.enabled == 'true'
       uses: ./.github/actions/susfs-patches
       with:
         version: ${{ inputs.version }}
         sublevel: ${{ inputs.sublevel }}
         os_patch_level: ${{ inputs.os_patch_level }}
 
-    # (susfs-revert-patches removed 2026-10-27: its only live step rewrote
-    # `goto show_pad;`, a line SUSFS stopped emitting in ef16cbc (2026-05-10);
-    # the gated sources no longer contain it either, so the step was a no-op.)
-
-    - name: Fix selinux_hide pointer-bool-conversion on 6.6+ (ALL branches)
-      # Runs whether or not SUSFS patches were applied: every root flavor
-      # compiles its own selinux_hide.c, and 6.6+ clang turns the bare
-      # `if (fn)` forms into -Werror. The file list used to be fed from
-      # `find`; a 2026 rewrite to `while read` lost the producer and the
-      # step silently iterated zero files. Enumerate explicitly.
-      shell: bash
-      run: |
-        set -euo pipefail
-        KVER="${{ inputs.kernel_version }}"
-        if [ "$(printf '%s\n' "6.6" "$KVER" | sort -V | head -n1)" != "6.6" ]; then
-          echo "[-] KVER $KVER < 6.6; no selinux_hide fix needed"
-          exit 0
-        fi
-        echo "[*] KVER $KVER >= 6.6, patching selinux_hide.c (all flavors/branches)"
-        mapfile -d '' FILES < <(find "$GITHUB_WORKSPACE/kernel" -name selinux_hide.c \
-          -not -path '*/.git/*' -print0 2>/dev/null || true)
-        if [ "${#FILES[@]}" -eq 0 ]; then
-          echo "[-] no selinux_hide.c under $GITHUB_WORKSPACE/kernel (root_flavor='${{ inputs.root_flavor }}'); nothing to patch"
-          exit 0
-        fi
-        for f in "${FILES[@]}"; do
-          # After SUSFS 10_enable (kernelsu only) the declaration becomes
-          #   extern void security_dump_masked_av_fn(...)   (a function)
-          #   if (func) / if (func != NULL) both trigger -Werror:
-          #     -Wpointer-bool-conversion  vs  -Wtautological-pointer-compare
-          # For the function form,  &func != NULL  silences both (clang note).
-          # For the pointer form (bakasu/next/sukisu-ultra/finasu, no 10_enable) we want ptr != NULL.
-          if grep -q "extern void security_dump_masked_av_fn" "$f"; then
-            echo "[*] $f is extern-function form (10_enable applied), patching with &"
-            sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g' "$f"
-            sed -i 's/if (security_dump_masked_av_fn != NULL)/if (\&security_dump_masked_av_fn != NULL)/g' "$f"
-            sed -i 's/if (context_struct_compute_av_fn)/if (\&context_struct_compute_av_fn)/g' "$f"
-            sed -i 's/if (context_struct_compute_av_fn != NULL)/if (\&context_struct_compute_av_fn != NULL)/g' "$f"
-            echo "[+] Patched $f (function form)"
-          elif grep -q "if (security_dump_masked_av_fn" "$f"; then
-            echo "[*] $f is pointer form, patching with != NULL"
-            sed -i 's/if (security_dump_masked_av_fn)/if (security_dump_masked_av_fn != NULL)/g' "$f"
-            sed -i 's/if (context_struct_compute_av_fn)/if (context_struct_compute_av_fn != NULL)/g' "$f"
-            echo "[+] Patched $f (pointer form)"
-          else
-            echo "[*] $f already patched"
-          fi
-          # Next (and tiann without 10_enable fallback) declares the 3 helpers as
-          # static on 6.6, but kernel hooks.c/selinuxfs.c reference them as extern
-          # after SUSFS (BakaSU uses __maybe_static -> global). Strip static so
-          # the linker can resolve security_context_to_sid_with_policy etc.
-          if grep -q "^static int security_context_to_sid_with_policy" "$f"; then
-            echo "[*] Stripping static from $f helpers (Next 6.6)"
-            sed -i 's/^static int security_context_to_sid_with_policy/int security_context_to_sid_with_policy/g' "$f"
-            sed -i 's/^static int security_sid_to_context_with_policy/int security_sid_to_context_with_policy/g' "$f"
-            sed -i 's/^static void security_compute_av_user_with_policy/void security_compute_av_user_with_policy/g' "$f"
-            # tiann's definition carries __nocfi on 6.6+, so the plain pattern
-            # above misses it and the prototype loses static while the
-            # definition keeps it:
-            #   error: static declaration of 'security_compute_av_user_with_policy'
-            #          follows non-static declaration
-            sed -i 's/^static void __nocfi security_compute_av_user_with_policy/void __nocfi security_compute_av_user_with_policy/g' "$f"
-            # also forward decls (same prefix, same sed covers them)
-            echo "[+] Stripped static from $f"
-          fi
-        done
+    - name: Revert SUSFS Fake Patches
+      uses: ./.github/actions/susfs-revert-patches
+      with:
+        version: ${{ inputs.version }}
+        sublevel: ${{ inputs.sublevel }}
+        os_patch_level: ${{ inputs.os_patch_level }}

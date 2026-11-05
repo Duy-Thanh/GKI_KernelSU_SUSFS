@@ -28,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAGS=$(gh release list --limit 1000 --json tagName,name --jq '.[] | select(.name == "General Cache") | .tagName')
+          TAGS=$(gh release list --limit 1000 --json tagName,name --jq -r '.[] | select(.name == "General Cache") | .tagName')
           if [ -z "$TAGS" ]; then
             echo "No General Cache releases found. Nothing to do."
             exit 0

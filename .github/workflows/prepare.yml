@@ -71,6 +71,11 @@ on:
         required: false
         type: boolean
         default: false
+      use_cache:
+        description: "Enable ccache/bazel cache"
+        required: false
+        type: boolean
+        default: true
       os_patch_level:
         description: "Optional filter: patch date (YYYY-MM), kernel sublevel, lts (LTS branch), or all"
         required: false
@@ -121,10 +126,7 @@ jobs:
             --argjson cfg "$CONFIG_JSON" \
             --arg requested_variant "${{ inputs.variant }}" '
             ($cfg.version | split("-")) as $version_parts
-            # A row marked "disabled": true is a temporary switch-off (duplicate
-            # sublevel already covered by another month, or a month being
-            # retired). The row stays in the file so re-enabling it is one word.
-            | ($cfg.include | map(select(.disabled != true))) as $targets
+            | ($cfg.include) as $targets
             | {
               include: (
                 [
@@ -343,6 +345,7 @@ jobs:
       brand_name: ${{ inputs.brand_name }}
       keep_kmi: ${{ inputs.keep_kmi }}
       allow_version_mismatch: ${{ inputs.allow_version_mismatch }}
+      use_cache: ${{ inputs.use_cache }}
       page_size: ${{ inputs.page_size }}
       manifest_url: ${{ inputs.manifest_url }}
       stock_config_artifact: stock-configs-${{ needs.generate-matrix.outputs.version_slug }}
